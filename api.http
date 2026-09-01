@@ -1,0 +1,377 @@
+### AI Voice Agent — Dashboard API
+### Run top to bottom from IntelliJ's gutter icons; the token and ids are captured for you.
+
+@host = http://localhost:8080
+@api = {{host}}/api/v1
+
+### Health
+GET {{host}}/actuator/health
+
+### ---------------------------------------------------------------- AUTH
+
+### Login as the bootstrap admin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@vedryxtech.com",
+  "password": "Admin@12345"
+}
+
+> {% client.global.set("token", response.body.accessToken); %}
+
+### Who am I
+GET {{api}}/auth/me
+Authorization: Bearer {{token}}
+
+### Current organization and its call policy
+GET {{api}}/organizations/current
+Authorization: Bearer {{token}}
+
+### Retune the retry rules (ORG_ADMIN)
+PUT {{api}}/organizations/current/call-policy
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "maxAttempts": 5,
+  "maxAttemptsPerDay": 3,
+  "retryBackoffMinutes": {
+    "noAnswer": 90,
+    "busy": 20,
+    "rejected": 1440,
+    "voicemail": 240,
+    "failed": 10
+  },
+  "callingWindowStart": "09:30",
+  "callingWindowEnd": "19:30",
+  "recordingEnabled": true
+}
+
+### Add an agent user
+POST {{api}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "agent@vedryxtech.com",
+  "password": "Agent@12345",
+  "fullName": "Floor Agent",
+  "roles": ["agent"]
+}
+
+### No token -> 401
+GET {{api}}/leads
+
+### ---------------------------------------------------------------- LEADS
+
+### Create a FRESH lead - all it takes is a name and a number.
+### It is queued for a call straight away. No action fields: the call produces those.
+POST {{api}}/leads
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Shrikant",
+  "phone": "+919000000101",
+  "project": "My Home Sanctuary",
+  "source": "website",
+  "campaign": "sanctuary-launch"
+}
+
+> {% client.global.set("leadId", response.body.id); %}
+
+### Import a lead that was already worked elsewhere - the action fields are
+### accepted here too, and each action type requires its own time.
+POST {{api}}/leads
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "The Dev",
+  "phone": "+919000000102",
+  "project": "My Home Sanctuary",
+  "actionType": "siteVisit",
+  "scheduledFor": "2026-09-05T10:00:00+05:30",
+  "reminderEnabled": true,
+  "notes": "Lead explicitly confirmed the site-visit date and time."
+}
+
+### Duplicate phone number -> 409
+POST {{api}}/leads
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Duplicate",
+  "phone": "+91 90000 00101"
+}
+
+### Upsert — same number, newer action
+PUT {{api}}/leads
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Shrikant",
+  "phone": "+919000000101",
+  "project": "My Home Sanctuary",
+  "source": "walk-in"
+}
+
+### List — pending work only
+GET {{api}}/leads?pipelineStatus=queued&size=20
+Authorization: Bearer {{token}}
+
+### List — converted leads
+GET {{api}}/leads?finalStatus=siteVisitBooked
+Authorization: Bearer {{token}}
+
+### List — leads with a recording
+GET {{api}}/leads?hasRecording=true
+Authorization: Bearer {{token}}
+
+### Find by phone through the list endpoint
+GET {{api}}/leads?phone=+919000000101
+Authorization: Bearer {{token}}
+
+### Partial update
+PATCH {{api}}/leads/{{leadId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "notes": "Reviewed by the sales desk.",
+  "assignedTo": "floor-agent-1"
+}
+
+### Manual suppression (stops the dialler immediately)
+PATCH {{api}}/leads/{{leadId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "doNotCall": true
+}
+
+### Put a lead back in the queue
+PATCH {{api}}/leads/{{leadId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "pipelineStatus": "queued",
+  "doNotCall": false
+}
+
+### ---------------------------------------------------------------- CALLS
+
+### How much work is due right now
+GET {{api}}/call-queue
+Authorization: Bearer {{token}}
+
+### Dialler claims a batch (atomic)
+POST {{api}}/call-queue/claims?limit=5
+Authorization: Bearer {{token}}
+
+> {% if (response.body.length > 0) {
+       client.global.set("callLogId", response.body[0].callLogId);
+       client.global.set("callLeadId", response.body[0].leadId);
+     } %}
+
+### Call one lead now (idempotent on the key)
+POST {{api}}/leads/{{leadId}}/calls
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "idempotencyKey": "worker-1-attempt-abc123",
+  "handledBy": "ai_agent"
+}
+
+### Hangup — NO ANSWER -> retry with backoff, inside the calling window
+POST {{api}}/calls/{{callLogId}}/outcome
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "outcome": "noAnswer",
+  "ringSeconds": 25
+}
+
+### Hangup — ANSWERED, site visit booked -> lead closes as converted
+POST {{api}}/calls/{{callLogId}}/outcome
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "outcome": "answered",
+  "disposition": "siteVisitBooked",
+  "talkSeconds": 214,
+  "siteVisitAt": "2026-09-06T11:00:00+05:30",
+  "summary": "Wants the 3 BHK; visiting Saturday.",
+  "recordingUrl": "https://recordings.local/call-abc.mp3",
+
+  "leadName": "Shrikant Giri",
+  "leadProject": "My Home Sanctuary",
+  "leadQuery": "Can 2 BHK and 3 BHK be combined to make 5 BHK?",
+  "whatsappPhone": "+919876543210"
+}
+
+### Hangup — ANSWERED, wants a callback -> booked, no attempt spent
+POST {{api}}/calls/{{callLogId}}/outcome
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "outcome": "answered",
+  "disposition": "callbackRequested",
+  "talkSeconds": 41,
+  "requestedCallbackAt": "2026-09-02T18:30:00+05:30",
+  "summary": "Busy, asked for Tuesday evening."
+}
+
+### Hangup — ANSWERED, do not call -> suppressed for good
+POST {{api}}/calls/{{callLogId}}/outcome
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "outcome": "answered",
+  "disposition": "doNotCall",
+  "talkSeconds": 12
+}
+
+### Callback with no time -> 422
+POST {{api}}/calls/{{callLogId}}/outcome
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "outcome": "answered",
+  "disposition": "callbackRequested"
+}
+
+### Reschedule outside a call — 23:30 gets clamped to the next 09:00
+POST {{api}}/leads/{{callLeadId}}/call-reschedules
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "requestedAt": "2026-09-03T23:30:00+05:30",
+  "notes": "Lead asked for late night; pushed into the calling window."
+}
+
+### Free leads abandoned mid-call by a dead worker
+POST {{api}}/call-queue/recoveries
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------- FOLLOW-UP HISTORY
+
+### Full attempt history for one lead
+GET {{api}}/leads/{{callLeadId}}/calls
+Authorization: Bearer {{token}}
+
+### Searchable call log
+GET {{api}}/calls?outcome=noAnswer&size=20
+Authorization: Bearer {{token}}
+
+### One attempt with its event timeline
+GET {{api}}/calls/{{callLogId}}
+Authorization: Bearer {{token}}
+
+### --------------------------------------------------------------- RECORDINGS
+
+### Everything with a playable recording
+GET {{api}}/calls/recordings
+Authorization: Bearer {{token}}
+
+### Playback URL for one attempt
+GET {{api}}/calls/{{callLogId}}/recording
+Authorization: Bearer {{token}}
+
+
+### ---------------------------------------------------------------- DASHBOARD
+
+### Everything the landing page needs
+GET {{api}}/dashboard/summary?range=month
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------- AI AGENT (API KEY)
+### The voice-agent application uses a key instead of logging in.
+### The default key is created on first start; rotate it with the endpoint below.
+
+@apiKey = vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+
+### Agent reads the lead list - no login involved
+GET {{api}}/leads?size=5
+X-API-Key: {{apiKey}}
+
+### Agent pushes in a fresh lead to be called
+POST {{api}}/leads
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "name": "Captured By Agent",
+  "phone": "+919000000222",
+  "project": "My Home Sanctuary",
+  "source": "inbound-call"
+}
+
+### Agent takes work from the queue
+POST {{api}}/call-queue/claims?limit=3
+X-API-Key: {{apiKey}}
+
+> {% if (response.body.length > 0) {
+       client.global.set("agentCallLogId", response.body[0].callLogId);
+     } %}
+
+### Agent reports the call, attaching the recording link
+POST {{api}}/calls/{{agentCallLogId}}/outcome
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "outcome": "answered",
+  "disposition": "siteVisitBooked",
+  "talkSeconds": 186,
+  "siteVisitAt": "2026-09-07T11:00:00+05:30",
+  "summary": "Booked Saturday visit.",
+  "recordingUrl": "https://recordings.local/call-abc.mp3",
+
+  "leadName": "Shrikant Giri",
+  "leadProject": "My Home Sanctuary",
+  "leadQuery": "Asked about floor plans and payment schedule"
+}
+
+### A wrong key is refused
+GET {{api}}/leads
+X-API-Key: vdx_not_a_real_key
+
+### The agent cannot manage users (403)
+POST {{api}}/users
+X-API-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "email": "nope@vedryxtech.com",
+  "password": "Passw0rd!",
+  "fullName": "Should Fail",
+  "roles": ["agent"]
+}
+
+### ------------------------------------------------------- API KEY MANAGEMENT (ADMIN)
+
+### Show which key is in use (prefix only - the key itself cannot be read back)
+GET {{api}}/api-keys/current
+Authorization: Bearer {{token}}
+
+### Rotate the key. The full key is in this response and nowhere else - copy it.
+### The previous key stops working immediately.
+POST {{api}}/api-keys/current
+Authorization: Bearer {{token}}
+
+### Revoke the key entirely
+DELETE {{api}}/api-keys/current
+Authorization: Bearer {{token}}

@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+#  AI Voice Agent - Dashboard API
+#
+#  Ready to run locally as-is:
+#      mvn spring-boot:run
+#
+#  Then open  http://localhost:8082/swagger-ui.html
+#
+#  Log in with        admin@vedryxtech.com / Admin@12345
+#  AI agent API key   vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+#
+#  Every value below is a real, working local value. Change the ones marked
+#  CHANGE BEFORE PRODUCTION before this runs anywhere other than a laptop.
+# ---------------------------------------------------------------------------
+
+spring:
+  application:
+    name: ai-voice-agent-dashboard
+
+  data:
+    mongodb:
+      # Local MongoDB on the default port. The database is created on first write.
+      uri: mongodb://localhost:27017/vedryx_voice_agent
+      auto-index-creation: true
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 200
+
+  jackson:
+    # camelCase on the wire, matching the Java field names.
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: true
+    deserialization:
+      fail-on-unknown-properties: false
+
+server:
+  port: 8082
+  error:
+    include-message: always
+
+app:
+  security:
+    # CHANGE BEFORE PRODUCTION. Must be at least 32 characters.
+    jwt-secret: vedryxtech-local-development-signing-key-32plus
+    issuer: vedryxtech-voice-agent
+    access-token-ttl: 12h
+
+    bootstrap:
+      # Creates the organization, its admin and the API key on first start.
+      # Re-running is safe: nothing already in the database is overwritten.
+      enabled: true
+
+      organization-name: Vedryx Tech
+      organization-slug: vedryx-tech
+      timezone: Asia/Kolkata
+
+      # CHANGE BEFORE PRODUCTION.
+      admin-email: admin@vedryxtech.com
+      admin-password: Admin@12345
+      admin-name: Vedryx Admin
+
+      # The key the AI voice agent sends as the X-API-Key header.
+      # CHANGE BEFORE PRODUCTION, or rotate it with POST /api/v1/api-keys/current
+      api-key: vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+
+      # Loads the 14 sample leads from seed/leads.json so there is something to look at.
+      # Set to false once you have your own data.
+      seed-leads: true
+
+  dialer:
+    # Background sweep that returns calls abandoned mid-dial to the queue.
+    # Off: nothing runs on a timer. Trigger it yourself with POST /api/v1/call-queue/recoveries.
+    # This never placed calls - the dialler pulls work from POST /api/v1/call-queue/claims.
+    scheduler-enabled: false
+    maintenance-interval-ms: 60000
+    maintenance-initial-delay-ms: 30000
+    # How many leads one /call-queue/claims request may hand out.
+    batch-size: 25
+    # A call still marked "dialing" after this long is treated as abandoned.
+    stale-dial-minutes: 15
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+    display-request-duration: true
+    doc-expansion: none
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.vedryxtech.voiceagent: DEBUG

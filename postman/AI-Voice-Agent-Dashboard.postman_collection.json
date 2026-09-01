@@ -1,0 +1,2119 @@
+{
+  "info": {
+    "name": "AI Voice Agent - Dashboard API",
+    "_postman_id": "8f1c2b40-5d7a-4a1e-9c3b-a1b2c3d4e5f6",
+    "description": "# AI Voice Agent - Dashboard API\n\nImport this collection, then run **1. Auth -> Login** first. It stores the\naccess token in a collection variable, and every other request picks it up automatically.\n\n## Two ways to authenticate\n\n| Who | How |\n|---|---|\n| A person | `Authorization: Bearer <token>` from Login. Set once for the whole collection. |\n| The AI voice agent | `X-API-Key: {{apiKey}}`. Set on the requests in *6. AI agent*. |\n\n## Variables\n\n- `baseUrl` - http://localhost:8080\n- `apiKey` - the agent key from application.yml\n- `token`, `leadId`, `callLogId` - captured automatically as you work through the folders\n\n## Suggested order\n\n1. Login\n2. Leads -> Create a fresh lead\n3. Call queue -> Take work to call\n4. Calls -> Report what happened\n5. Dashboard -> any range\n\nThe whole API is **camelCase**, in bodies and in query parameters.\n\n## How dialling actually works (no background scheduler)\n\nNothing runs on a timer. The AI agent pulls work by calling\n`POST /api/v1/call-queue/claims` whenever it is ready for another lead - that single call\ncovers fresh leads AND due callbacks, since a booked callback becomes claimable again the\nmoment its time arrives. Report the result with\n`POST /api/v1/calls/{callLogId}/outcome` and the lead moves itself: retry, callback, or closed.\n\nIf a worker crashes between claim and outcome, that lead is stuck in *dialing* until someone\ncalls `POST /api/v1/call-queue/recoveries` - see *Call queue*.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "apiKey",
+      "value": "vdx_local_dev_key_2f8a41c6b09d47e5ab3c"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "leadId",
+      "value": ""
+    },
+    {
+      "key": "callLogId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Login and accounts",
+      "description": "Get a token first - everything else depends on it.",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"login succeeds\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", b.accessToken);",
+                  "pm.test(\"token returned\", () => pm.expect(b.accessToken).to.be.a(\"string\"));",
+                  "console.log(\"Signed in as\", b.user.email, \"|\", b.organization.name);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@vedryxtech.com\",\n  \"password\": \"Admin@12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Stores the access token in the {{token}} collection variable."
+          },
+          "response": []
+        },
+        {
+          "name": "Who am I",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Confirms the token still works."
+          },
+          "response": []
+        },
+        {
+          "name": "My organization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "current"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update calling rules",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"maxAttempts\": 5,\n  \"maxAttemptsPerDay\": 3,\n  \"retryBackoffMinutes\": {\n    \"noAnswer\": 90,\n    \"busy\": 20,\n    \"rejected\": 1440,\n    \"voicemail\": 240,\n    \"failed\": 10\n  },\n  \"callingWindowStart\": \"09:30\",\n  \"callingWindowEnd\": \"19:30\",\n  \"recordingEnabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/current/call-policy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "current",
+                "call-policy"
+              ]
+            },
+            "description": "Admins only. Retries, the wait after each kind of failed call, and the hours calls are allowed."
+          },
+          "response": []
+        },
+        {
+          "name": "Add a teammate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent@vedryxtech.com\",\n  \"password\": \"Agent@12345\",\n  \"fullName\": \"Floor Agent\",\n  \"phone\": \"+919000000001\",\n  \"roles\": [\n    \"agent\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Admins only. Roles: orgAdmin, manager, agent, viewer."
+          },
+          "response": []
+        },
+        {
+          "name": "List teammates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register a new company",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationName\": \"Acme Realty\",\n  \"slug\": \"acme-realty\",\n  \"timezone\": \"Asia/Kolkata\",\n  \"adminEmail\": \"admin@acme.test\",\n  \"adminPassword\": \"Acme@12345\",\n  \"adminFullName\": \"Acme Admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations"
+              ]
+            },
+            "description": "Public endpoint. Only useful on a fresh database."
+          },
+          "response": []
+        },
+        {
+          "name": "No credentials -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected without credentials\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. API key for the AI agent",
+      "description": "The key the voice-agent application authenticates with. Admin only.",
+      "item": [
+        {
+          "name": "Show current key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/api-keys/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "api-keys",
+                "current"
+              ]
+            },
+            "description": "Returns the prefix only. The key itself is stored hashed and cannot be read back."
+          },
+          "response": []
+        },
+        {
+          "name": "Create / rotate key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"key created\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set(\"apiKey\", b.apiKey);",
+                  "console.log(\"New API key saved to {{apiKey}}:\", b.apiKey);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/api-keys/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "api-keys",
+                "current"
+              ]
+            },
+            "description": "Returns the full key ONCE and saves it into {{apiKey}}. The previous key stops working immediately."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/api-keys/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "api-keys",
+                "current"
+              ]
+            },
+            "description": "The agent loses access at once."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Leads",
+      "description": "The people to call. A fresh lead needs only a name and a phone number.",
+      "item": [
+        {
+          "name": "Create a fresh lead",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"created\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set(\"leadId\", b.id);",
+                  "pm.test(\"queued to be called\", () => pm.expect(b.pipelineStatus).to.eql(\"new\"));",
+                  "pm.test(\"no action agreed yet\", () => pm.expect(b.actionType).to.eql(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Shrikant\",\n  \"phone\": \"+919000000101\",\n  \"project\": \"My Home Sanctuary\",\n  \"source\": \"website\",\n  \"campaign\": \"sanctuary-launch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            },
+            "description": "All it takes is a name and a number. Saved with pipelineStatus \"new\" and queued for a call straight away. Stores the id in {{leadId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Create - already worked elsewhere",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"The Dev\",\n  \"phone\": \"+919000000102\",\n  \"project\": \"My Home Sanctuary\",\n  \"actionType\": \"siteVisit\",\n  \"scheduledFor\": \"2026-09-05T10:00:00+05:30\",\n  \"reminderEnabled\": true,\n  \"notes\": \"Lead confirmed the site-visit date and time.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            },
+            "description": "The action fields are accepted here too, for importing. Each actionType requires its own time."
+          },
+          "response": []
+        },
+        {
+          "name": "Duplicate number -> 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected as duplicate\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Duplicate\",\n  \"phone\": \"+91 90000 00101\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            },
+            "description": "The same number as the lead you just created, only formatted differently. Spaces and dashes are ignored, so this is rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "Add or update by number",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Shrikant\",\n  \"phone\": \"+919000000101\",\n  \"project\": \"My Home Sanctuary\",\n  \"source\": \"walk-in\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            },
+            "description": "Safe to call repeatedly - this is what the agent should use."
+          },
+          "response": []
+        },
+        {
+          "name": "Missing name and phone -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"validation failed\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"names the missing fields\", () => {",
+                  "  const e = pm.response.json().fieldErrors;",
+                  "  pm.expect(e).to.have.property(\"name\");",
+                  "  pm.expect(e).to.have.property(\"phone\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"project\": \"My Home Sanctuary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List all leads",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?page=0&size=20&sortBy=createdAt&sortDir=desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "createdAt"
+                },
+                {
+                  "key": "sortDir",
+                  "value": "desc"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List - waiting to be called",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?pipelineStatus=new",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "pipelineStatus",
+                  "value": "new"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List - won",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?finalStatus=siteVisitBooked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "finalStatus",
+                  "value": "siteVisitBooked"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List - with a recording",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?hasRecording=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "hasRecording",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List - by date created",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?createdFrom=2026-08-01T00:00:00Z&createdTo=2026-12-31T23:59:59Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "createdFrom",
+                  "value": "2026-08-01T00:00:00Z"
+                },
+                {
+                  "key": "createdTo",
+                  "value": "2026-12-31T23:59:59Z"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get one lead",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Find by phone number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/by-phone/+919000000101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "by-phone",
+                "+919000000101"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update some fields (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"update succeeds\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"id is unchanged\", () => pm.expect(b.id).to.eql(pm.collectionVariables.get(\"leadId\")));",
+                  "pm.test(\"the field you sent was applied\", () => pm.expect(b.pipelineStatus).to.eql(\"queued\"));",
+                  "pm.test(\"notes was applied\", () => pm.expect(b.notes).to.eql(\"Reviewed by the sales desk.\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Reviewed by the sales desk.\",\n  \"assignedTo\": \"floor-agent-1\",\n  \"pipelineStatus\": \"queued\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "description": "Partial update: only the fields you send change. name, phone, project, id all stay exactly as they were."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace a lead (PUT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"replace succeeds\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"id is unchanged\", () => pm.expect(b.id).to.eql(pm.collectionVariables.get(\"leadId\")));",
+                  "pm.test(\"actionType now set\", () => pm.expect(b.actionType).to.eql(\"teamCallback\"));",
+                  "pm.test(\"callbackAt now set\", () => pm.expect(b.callbackAt).to.not.be.null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Shah\",\n  \"phone\": \"+919000112233\",\n  \"project\": \"My Home Sanctuary\",\n  \"actionType\": \"teamCallback\",\n  \"callbackAt\": \"2026-09-02T15:00:00+05:30\",\n  \"confirmedByLead\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "description": "Full replace: send the whole lead. Any field you leave out is cleared, unlike PATCH. Use this when you have the complete record; use PATCH when you only want to change a few fields."
+          },
+          "response": []
+        },
+        {
+          "name": "Requeue a lead",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "%7B%7BleadId%7D%7D"
+              ]
+            },
+            "description": "Run before the do-not-call request below - a suppressed lead refuses to be re-queued (422) until the flag is cleared.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pipelineStatus\": \"queued\",\n  \"doNotCall\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "description": "Use PATCH /api/v1/leads/{leadId} with pipelineStatus=queued instead of a dedicated queue endpoint."
+        },
+        {
+          "name": "Never call this person again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"suppressed\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"doNotCall is true\", () => pm.expect(b.doNotCall).to.eql(true));",
+                  "pm.test(\"pipelineStatus is suppressed\", () => pm.expect(b.pipelineStatus).to.eql(\"suppressed\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doNotCall\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "description": "Stops all future calls immediately. This is a terminal demo step - nothing after it re-queues this lead."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete one lead",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"deleted\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "description": "Managers and admins only - the AI agent's API key gets 403 here on purpose. Uses the collection Bearer token, not X-API-Key."
+          },
+          "response": []
+        },
+        {
+          "name": "Get one lead -> 404 after delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"gone\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "description": "Confirms the delete actually took effect."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Calls and history",
+      "description": "Take work, place the call, report what happened. The outcome is what moves the lead.",
+      "item": [
+        {
+          "name": "How many are due now",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/call-queue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "call-queue"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Take work to call",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"claim succeeds\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.length) {",
+                  "  pm.collectionVariables.set(\"callLogId\", b[0].callLogId);",
+                  "  pm.collectionVariables.set(\"leadId\", b[0].leadId);",
+                  "  console.log(\"Claimed\", b.length, \"lead(s). First attempt:\", b[0].callLogId);",
+                  "} else {",
+                  "  console.log(\"Nothing due right now - create a lead first.\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/call-queue/claims?limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "call-queue",
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Atomically claims due leads, so two callers never get the same person. Saves the first attempt into {{callLogId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Call one lead now",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json(); if (b.callLogId) pm.collectionVariables.set(\"callLogId\", b.callLogId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idempotencyKey\": \"postman-attempt-001\",\n  \"handledBy\": \"ai_agent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "%7B%7BleadId%7D%7D",
+                "calls"
+              ]
+            },
+            "description": "Ignores the schedule. Repeating the same idempotencyKey returns the attempt already open instead of a second one."
+          },
+          "response": []
+        },
+        {
+          "name": "Report - nobody picked up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"retry booked or budget spent\", () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect([\"retryScheduled\", \"exhausted\"]).to.include(b.pipelineStatusAfter);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"noAnswer\",\n  \"ringSeconds\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            },
+            "description": "Schedules a retry with backoff, moved inside calling hours."
+          },
+          "response": []
+        },
+        {
+          "name": "Report - booked a site visit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"answered\",\n  \"disposition\": \"siteVisitBooked\",\n  \"talkSeconds\": 214,\n  \"siteVisitAt\": \"2026-09-06T11:00:00+05:30\",\n  \"summary\": \"Wants the 3 BHK, visiting Saturday.\",\n  \"recordingUrl\": \"https://recordings.local/call-abc.mp3\",\n  \"leadName\": \"Shrikant Giri\",\n  \"leadProject\": \"My Home Sanctuary\",\n  \"leadQuery\": \"Can 2 BHK and 3 BHK be combined to make 5 BHK?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            },
+            "description": "leadName / leadProject / leadQuery write back what the call taught us, so the lead record fills itself in."
+          },
+          "response": []
+        },
+        {
+          "name": "Report - wants a callback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"answered\",\n  \"disposition\": \"callbackRequested\",\n  \"talkSeconds\": 41,\n  \"requestedCallbackAt\": \"2026-09-02T18:30:00+05:30\",\n  \"summary\": \"Busy, asked for Tuesday evening.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            },
+            "description": "Booked at their time, and it does NOT use up a retry attempt."
+          },
+          "response": []
+        },
+        {
+          "name": "Report - never call me again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"answered\",\n  \"disposition\": \"doNotCall\",\n  \"talkSeconds\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Report - callback with no time -> 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"explains what is missing\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"answered\",\n  \"disposition\": \"callbackRequested\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Move a call to a time they asked for",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestedAt\": \"2026-09-03T23:30:00+05:30\",\n  \"notes\": \"Asked for late night; moved into calling hours.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}/call-reschedules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "%7B%7BleadId%7D%7D",
+                "call-reschedules"
+              ]
+            },
+            "description": "23:30 is outside calling hours, so it lands at 09:00 the next morning."
+          },
+          "response": []
+        },
+        {
+          "name": "Unstick abandoned calls",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/call-queue/recoveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "call-queue",
+                "recoveries"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "History for one lead",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads/{{leadId}}/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads",
+                "%7B%7BleadId%7D%7D",
+                "calls"
+              ]
+            },
+            "description": "Every attempt ever made for this lead, newest first. Read from the call log, not the lead."
+          },
+          "response": []
+        },
+        {
+          "name": "One call with its timeline",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search all calls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls?outcome=noAnswer&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls"
+              ],
+              "query": [
+                {
+                  "key": "outcome",
+                  "value": "noAnswer"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Calls you can listen to",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/recordings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "recordings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Recording for one call",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/recording",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "recording"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Dashboard",
+      "description": "Every number in one request, over the period you choose.\n\n- **Current status** - the tiles, the pipeline and final-status breakdowns, the action split -\n  is read from the **lead** records, because only the lead knows where things stand now.\n- **History** - calls, pick-up rate, talk time, outcomes, dispositions, the daily trend -\n  is read from the **call log**, because only the log knows what actually happened.\n\nThe same window applies to both: leads are counted by when they arrived, calls by when they\nwere placed, so the tiles and the charts always describe the same period.",
+      "item": [
+        {
+          "name": "Today",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=today",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "today"
+                }
+              ]
+            },
+            "description": "Since midnight, in the company timezone."
+          },
+          "response": []
+        },
+        {
+          "name": "Last week",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=week",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "week"
+                }
+              ]
+            },
+            "description": "The last 7 days."
+          },
+          "response": []
+        },
+        {
+          "name": "Last 15 days",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=fifteenDays",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "fifteenDays"
+                }
+              ]
+            },
+            "description": "The last 15 days."
+          },
+          "response": []
+        },
+        {
+          "name": "Last month",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=month",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "month"
+                }
+              ]
+            },
+            "description": "The last 30 days. This is the default when range is omitted."
+          },
+          "response": []
+        },
+        {
+          "name": "Last quarter",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=quarter",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "quarter"
+                }
+              ]
+            },
+            "description": "The last 90 days."
+          },
+          "response": []
+        },
+        {
+          "name": "All time",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "all"
+                }
+              ]
+            },
+            "description": "Everything ever recorded."
+          },
+          "response": []
+        },
+        {
+          "name": "Custom date range",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"summary returned\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "console.log(\"Window:\", b.window.range, b.window.from, \"->\", b.window.to, \"(\" + b.window.days + \" days)\");",
+                  "console.log(\"Leads:\", b.totals.totalLeads, \"| pending:\", b.totals.pending, \"| converted:\", b.totals.converted);",
+                  "console.log(\"Calls:\", b.calls.totalAttempts, \"| pick-up rate:\", b.calls.connectRatePercent + \"%\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=custom&from=2026-08-01T00:00:00Z&to=2026-12-31T23:59:59Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31T23:59:59Z"
+                }
+              ]
+            },
+            "description": "from is required; to defaults to now."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. AI agent (API key)",
+      "description": "The voice-agent application sends X-API-Key instead of logging in. No token, no expiry.",
+      "item": [
+        {
+          "name": "Agent reads the lead list",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads?size=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agent pushes in a fresh lead",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Captured By Agent\",\n  \"phone\": \"+919000000222\",\n  \"project\": \"My Home Sanctuary\",\n  \"source\": \"inbound-call\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agent takes work",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json(); if (b.length) pm.collectionVariables.set(\"callLogId\", b[0].callLogId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/call-queue/claims?limit=3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "call-queue",
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "3"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agent reports the call",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"answered\",\n  \"disposition\": \"siteVisitBooked\",\n  \"talkSeconds\": 186,\n  \"siteVisitAt\": \"2026-09-07T11:00:00+05:30\",\n  \"summary\": \"Booked Saturday visit.\",\n  \"recordingUrl\": \"https://recordings.local/agent-call.mp3\",\n  \"leadName\": \"Shrikant Giri\",\n  \"leadProject\": \"My Home Sanctuary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls/{{callLogId}}/outcome",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls",
+                "{{callLogId}}",
+                "outcome"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agent reads the dashboard",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/summary?range=week",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "week"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Wrong key -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "vdx_not_a_real_key"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leads"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Agent cannot manage users -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"forbidden\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nope@vedryxtech.com\",\n  \"password\": \"Passw0rd!\",\n  \"fullName\": \"Should Fail\",\n  \"roles\": [\n    \"agent\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
