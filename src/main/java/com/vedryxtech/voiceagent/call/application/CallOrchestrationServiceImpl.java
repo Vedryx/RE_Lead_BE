@@ -24,6 +24,8 @@ import com.vedryxtech.voiceagent.exception.InvalidStateTransitionException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.call.persistence.LeadCallLogRepository;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
+import com.vedryxtech.voiceagent.storage.CallArtifactService;
+import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import com.vedryxtech.voiceagent.security.CurrentActor;
 import com.vedryxtech.voiceagent.call.application.CallOrchestrationService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
@@ -92,19 +94,22 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private final MongoTemplate mongoTemplate;
     private final CallPolicyProperties dialerProperties;
     private final CurrentActor currentActor;
+    private final CallArtifactService artifacts;
 
     public CallOrchestrationServiceImpl(LeadRepository leadRepository,
                                         LeadCallLogRepository callLogRepository,
                                         OrganizationService organizationService,
                                         MongoTemplate mongoTemplate,
                                         CallPolicyProperties dialerProperties,
-                                        CurrentActor currentActor) {
+                                        CurrentActor currentActor,
+                                        CallArtifactService artifacts) {
         this.leadRepository = leadRepository;
         this.callLogRepository = callLogRepository;
         this.organizationService = organizationService;
         this.mongoTemplate = mongoTemplate;
         this.dialerProperties = dialerProperties;
         this.currentActor = currentActor;
+        this.artifacts = artifacts;
     }
 
     // ------------------------------------------------------------------ claim
@@ -223,6 +228,30 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
      * <p>Only calls that actually happened count: the audit rows a reschedule writes have
      * no outcome and would read as a silent conversation.
      */
+    /**
+     * Keep what was said, in both places it belongs.
+     *
+     * <p>Mongo is the index — it makes the words searchable. The archive copy beside the
+     * audio is written later, once the outcome is fully decided, so the file carries the
+     * disposition rather than a null.
+     */
+    private void keepTranscript(LeadCallLog callLog, CallOutcomeRequest request) {
+        if (request.transcript() == null || request.transcript().isEmpty()) {
+            return;
+        }
+        List<TranscriptTurn> turns = request.transcript().stream()
+                .map(turn -> new TranscriptTurn(turn.role(), turn.text(), turn.atSeconds()))
+                .toList();
+        callLog.setTranscript(turns);
+        // The agent sends the count before truncation. Falling back to what arrived keeps
+        // the field honest rather than absent when an older agent posts.
+        callLog.setTranscriptTurnCount(request.transcriptTurnCount() != null
+                ? request.transcriptTurnCount()
+                : turns.size());
+        callLog.addEvent(CallEvent.of(CallEventType.HANGUP,
+                "Transcript captured: " + turns.size() + " turn(s)"));
+    }
+
     private CallContext contextFor(Lead lead, LeadCallLog current) {
         List<CallContext.PriorCall> priors = callLogRepository
                 .findByLeadIdOrderByAttemptNumberDesc(lead.getId()).stream()
@@ -330,6 +359,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         }
 
         LeadCallLog saved = callLogRepository.save(callLog);
+        // The id only exists after the first save, and both keys are built from it. Doing
+        // this now rather than at teardown is what lets the agent tell egress where to put
+        // the audio instead of learning the location from a webhook minutes later.
+        artifacts.assignKeys(saved, lead.getProject());
+        saved = callLogRepository.save(saved);
 
         lead.setPipelineStatus(LeadPipelineStatus.DIALING);
         lead.setAttemptCount(attemptNumber);
@@ -384,6 +418,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             callLog.setRecordingReadyAt(now);
             lead.setLastRecordingUrl(request.recordingUrl());
         }
+        keepTranscript(callLog, request);
         callLog.addEvent(CallEvent.of(CallEventType.HANGUP, "Call ended as " + outcome.getValue())
                 .with("talk_seconds", callLog.getTalkSeconds()));
 
@@ -408,6 +443,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 .with("final_status", lead.getFinalStatus() == null ? null : lead.getFinalStatus().getValue()));
 
         LeadCallLog savedLog = callLogRepository.save(callLog);
+        // Archived last, on the saved log: the file is meant to be readable without the
+        // database that produced it, and the disposition is only decided above this line.
+        artifacts.archiveTranscript(savedLog, savedLog.getTranscript());
         lead.setLastCallLogId(savedLog.getId());
         lead.setUpdatedAt(now);
         leadRepository.save(lead);

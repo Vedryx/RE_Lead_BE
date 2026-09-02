@@ -70,6 +70,21 @@ app:
       # file later cannot feed test rows to a live dialler.
       seed-leads: false
 
+  # Call artifacts: the audio and the transcript, one prefix per call.
+  # Off by default — with no bucket the CRM still records calls and transcripts in
+  # Mongo, it simply has no archive to point at.
+  storage:
+    enabled: ${R2_ENABLED:false}
+    endpoint: ${R2_ENDPOINT:}
+    region: auto
+    bucket: ${R2_BUCKET:}
+    access-key: ${R2_ACCESS_KEY:}
+    secret-key: ${R2_SECRET_KEY:}
+    prefix: recordings
+    # A presigned URL is a bearer token. Long enough to press play, short enough
+    # that one pasted into a chat is dead before it travels.
+    link-ttl: 15m
+
   dialer:
     # Background sweep that returns calls abandoned mid-dial to the queue.
     # On from Phase 3: an automatic dialler means leads get stranded in "dialing"

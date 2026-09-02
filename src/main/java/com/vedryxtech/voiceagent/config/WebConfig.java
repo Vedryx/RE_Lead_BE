@@ -10,6 +10,7 @@ import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 import com.vedryxtech.voiceagent.user.domain.UserRole;
+import com.vedryxtech.voiceagent.storage.ObjectStorageProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.format.FormatterRegistry;
@@ -21,7 +22,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * ({@code ?pipelineStatus=retryScheduled} rather than {@code RETRY_SCHEDULED}).
  */
 @Configuration
-@EnableConfigurationProperties(CallPolicyProperties.class)
+@EnableConfigurationProperties({CallPolicyProperties.class, ObjectStorageProperties.class})
 public class WebConfig implements WebMvcConfigurer {
 
     @Override

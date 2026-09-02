@@ -14,6 +14,12 @@ public record CallSessionResponse(
         int attemptNumber,
         boolean recordingEnabled,
 
+        @Schema(description = "Exactly where the audio must be written. The agent passes this "
+                + "to egress rather than letting it invent a name, so the CRM knows the "
+                + "location before the phone rings.",
+                example = "recordings/my-home-sanctuary/2026/09/6a97f01d.../audio.ogg")
+        String recordingKey,
+
         @Schema(description = "What is already known about this lead. Absent on a first call.")
         CallContext context
 ) {

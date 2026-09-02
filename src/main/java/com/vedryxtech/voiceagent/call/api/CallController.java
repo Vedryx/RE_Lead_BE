@@ -3,6 +3,7 @@ package com.vedryxtech.voiceagent.call.api;
 import com.vedryxtech.voiceagent.call.api.dto.CallLogResponse;
 import com.vedryxtech.voiceagent.call.api.dto.CallOutcomeRequest;
 import com.vedryxtech.voiceagent.call.api.dto.CallRecordingResponse;
+import com.vedryxtech.voiceagent.storage.CallArtifactService;
 import com.vedryxtech.voiceagent.common.pagination.PageResponse;
 import com.vedryxtech.voiceagent.call.mapper.CallLogMapper;
 import com.vedryxtech.voiceagent.call.application.CallOrchestrationService;
@@ -40,13 +41,16 @@ public class CallController {
     private final CallOrchestrationService orchestrationService;
     private final LeadCallLogService callLogService;
     private final CallLogMapper callLogMapper;
+    private final CallArtifactService artifacts;
 
     public CallController(CallOrchestrationService orchestrationService,
                           LeadCallLogService callLogService,
-                          CallLogMapper callLogMapper) {
+                          CallLogMapper callLogMapper,
+                          CallArtifactService artifacts) {
         this.orchestrationService = orchestrationService;
         this.callLogService = callLogService;
         this.callLogMapper = callLogMapper;
+        this.artifacts = artifacts;
     }
 
     @Operation(summary = "Report what happened on the call",
@@ -105,22 +109,39 @@ public class CallController {
                 callLogMapper::toResponse);
     }
 
-    @Operation(summary = "Get the recording for one call",
-            description = "Returns the audio link and whether it is ready yet. playable=false means the "
-                    + "recording is still being processed, or the call was never recorded.")
+    @Operation(summary = "Get the recording and transcript for one call",
+            description = "Returns the storage prefix both artifacts share, plus a short-lived "
+                    + "link to each. The links are bearer tokens: anyone holding one can open "
+                    + "that file until it expires, so do not pass them on. playable=false means "
+                    + "the audio is still processing, was never recorded, or has aged out.")
     @GetMapping("/{callLogId}/recording")
     public CallRecordingResponse recording(@PathVariable String callLogId) {
         var callLog = callLogService.require(callLogId);
-        // Only hand out a URL once the recording is actually finished.
-        String url = callLog.getRecordingStatus() != null && callLog.getRecordingStatus().isPlayable()
-                ? callLog.getRecordingUrl()
-                : null;
+        var links = artifacts.linksFor(callLog);
+
+        // Only hand out audio once the recording is actually finished. A link to a file
+        // still being written plays as silence, which reads as a broken call rather than
+        // a recording that is thirty seconds away.
+        boolean finished = callLog.getRecordingStatus() != null
+                && callLog.getRecordingStatus().isPlayable();
+        String audioUrl = finished ? links.getOrDefault("audioUrl", "") : "";
+        String transcriptUrl = links.getOrDefault("transcriptUrl", "");
+
+        boolean hasTranscript = !transcriptUrl.isEmpty()
+                || (callLog.getTranscript() != null && !callLog.getTranscript().isEmpty());
 
         return new CallRecordingResponse(
                 callLog.getIdAsString(),
                 callLog.getRecordingStatus(),
-                url == null ? "" : url,
-                callLog.getRecordingDurationSeconds() == null ? 0 : callLog.getRecordingDurationSeconds(),
-                url != null);
+                callLog.getRecordingPrefix(),
+                audioUrl,
+                transcriptUrl,
+                callLog.getRecordingDurationSeconds(),
+                callLog.getRecordingSizeBytes() == null ? null
+                        : Math.toIntExact(callLog.getRecordingSizeBytes()),
+                callLog.getTranscriptTurnCount(),
+                !audioUrl.isEmpty(),
+                hasTranscript,
+                audioUrl);
     }
 }

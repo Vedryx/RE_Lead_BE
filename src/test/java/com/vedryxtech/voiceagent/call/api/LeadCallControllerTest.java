@@ -66,7 +66,8 @@ class LeadCallControllerTest {
                 .willReturn(new CallOrchestrationService.CallSession(lead, callLog, true));
         given(callLogMapper.toResponse(any(CallOrchestrationService.CallSession.class)))
                 .willReturn(new CallSessionResponse(callLog.getId().toHexString(),
-                        lead.getId().toHexString(), "+917972221220", "Dev", 1, true, null));
+                        lead.getId().toHexString(), "+917972221220", "Dev", 1, true,
+                        "recordings/p/2026/09/abc/audio.ogg", null));
 
         mockMvc.perform(post("/api/v1/leads/{id}/calls", new ObjectId().toHexString())
                         .with(jwt()).with(csrf())
