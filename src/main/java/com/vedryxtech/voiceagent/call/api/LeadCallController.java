@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -43,9 +45,15 @@ public class LeadCallController {
     }
 
     @Operation(summary = "Call one specific lead now",
-            description = "The Call now button. Ignores the schedule. Refused with 409 if the lead asked "
-                    + "not to be contacted.")
+            description = "The Call now button. Queues the call ahead of everything scheduled and "
+                    + "ignores the retry budget, the daily cap and the funnel stage — a person "
+                    + "clicking this has overridden the policy on purpose. Refused with 409 if the "
+                    + "lead asked not to be contacted.\n\n"
+                    + "Answers 202, not 200: the call is queued, and the dialler places it on its "
+                    + "next pass. Watch GET /api/v1/calls/{callLogId} for dialStartedAt going "
+                    + "non-null, then answeredAt.")
     @PostMapping(path = "/calls", consumes = "application/json")
+    @ResponseStatus(HttpStatus.ACCEPTED)
     public CallSessionResponse start(@PathVariable String leadId,
                                      @Valid @RequestBody(required = false) StartCallRequest request) {
         return callLogMapper.toResponse(orchestrationService.startCall(leadId, request));

@@ -3,6 +3,7 @@ package com.vedryxtech.voiceagent.lead.application;
 import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 
@@ -18,6 +19,7 @@ public record LeadSearchCriteria(
         LeadStatus status,
         LeadPipelineStatus pipelineStatus,
         LeadFinalStatus finalStatus,
+        LeadStage stage,
         CallDisposition disposition,
         String phone,
         String name,
@@ -27,6 +29,7 @@ public record LeadSearchCriteria(
         OffsetDateTime createdFrom,
         OffsetDateTime createdTo,
         OffsetDateTime scheduledFrom,
-        OffsetDateTime scheduledTo
+        OffsetDateTime scheduledTo,
+        OffsetDateTime callbackBefore
 ) {
 }

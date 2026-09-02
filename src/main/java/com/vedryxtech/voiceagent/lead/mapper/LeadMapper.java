@@ -59,7 +59,11 @@ public interface LeadMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "pipelineStatus", ignore = true)
-    @Mapping(target = "finalStatus", ignore = true)
+    // Patchable on purpose: discarding a lead by hand has to record why, and a person
+    // may correct a stage the agent got wrong. Null is ignored, so omitting either
+    // leaves the existing value alone.
+    @Mapping(target = "finalStatus", source = "finalStatus")
+    @Mapping(target = "stage", source = "stage")
     @Mapping(target = "lastDisposition", ignore = true)
     @Mapping(target = "lastOutcome", ignore = true)
     @Mapping(target = "attemptCount", ignore = true)
@@ -71,6 +75,7 @@ public interface LeadMapper {
     @Mapping(target = "lastCallLogId", ignore = true)
     @Mapping(target = "doNotCall", source = "doNotCall")
     @Mapping(target = "lastRecordingUrl", ignore = true)
+    // The reason is consumed by the service, not stored as a field of its own.
     @Mapping(target = "version", ignore = true)
     void applyPatchValues(LeadPatchRequest patch, @MappingTarget Lead lead);
 

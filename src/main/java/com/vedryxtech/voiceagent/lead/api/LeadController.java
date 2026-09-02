@@ -4,6 +4,7 @@ import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 import com.vedryxtech.voiceagent.lead.api.dto.LeadPatchRequest;
@@ -14,6 +15,7 @@ import com.vedryxtech.voiceagent.lead.mapper.LeadMapper;
 import com.vedryxtech.voiceagent.lead.application.LeadSearchCriteria;
 import com.vedryxtech.voiceagent.lead.application.LeadService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springdoc.core.annotations.ParameterObject;
@@ -31,6 +33,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import com.vedryxtech.voiceagent.lead.application.LeadAuditService;
+import com.vedryxtech.voiceagent.lead.api.dto.LeadAuditResponse;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -46,10 +50,23 @@ public class LeadController {
 
     private final LeadService service;
     private final LeadMapper mapper;
+    private final LeadAuditService audit;
 
-    public LeadController(LeadService service, LeadMapper mapper) {
+    public LeadController(LeadService service, LeadMapper mapper, LeadAuditService audit) {
         this.service = service;
         this.mapper = mapper;
+        this.audit = audit;
+    }
+
+    @Operation(summary = "Who changed what on this lead",
+            description = "Manual edits only, newest first. Calls the agent made are on the "
+                    + "call log; this answers who moved the lead by hand.")
+    @GetMapping("/{id}/history")
+    public PageResponse<LeadAuditResponse> history(
+            @PathVariable String id,
+            @PageableDefault(size = 50) Pageable pageable) {
+        return PageResponse.from(audit.history(service.getById(id), pageable),
+                LeadAuditResponse::from);
     }
 
     // ------------------------------------------------------------------ CREATE
@@ -88,6 +105,12 @@ public class LeadController {
             @RequestParam(required = false) ActionType actionType,
             @RequestParam(required = false) LeadStatus status,
             @RequestParam(required = false) LeadPipelineStatus pipelineStatus,
+            @Parameter(description = "Funnel stage: new, followUp, callbackRequested, siteVisit, discarded")
+            @RequestParam(required = false) LeadStage stage,
+            @Parameter(description = "Callbacks promised before this time. With "
+                    + "stage=callbackRequested this is the \"waiting on a person\" worklist.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime callbackBefore,
             @RequestParam(required = false) LeadFinalStatus finalStatus,
             @RequestParam(required = false) CallDisposition disposition,
             @RequestParam(required = false) String phone,
@@ -108,9 +131,9 @@ public class LeadController {
             Pageable pageable) {
 
         LeadSearchCriteria criteria = new LeadSearchCriteria(
-                project, actionType, status, pipelineStatus, finalStatus, disposition,
+                project, actionType, status, pipelineStatus, finalStatus, stage, disposition,
                 phone, name, assignedTo, confirmedByLead, hasRecording,
-                createdFrom, createdTo, scheduledFrom, scheduledTo);
+                createdFrom, createdTo, scheduledFrom, scheduledTo, callbackBefore);
 
         Page<Lead> results = service.search(criteria, pageable);
         return PageResponse.from(results, mapper::toResponse);

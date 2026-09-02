@@ -21,7 +21,7 @@
     },
     {
       "key": "apiKey",
-      "value": "vdx_local_dev_key_2f8a41c6b09d47e5ab3c"
+      "value": "<set from your .env>"
     },
     {
       "key": "token",
@@ -71,7 +71,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@vedryxtech.com\",\n  \"password\": \"Admin@12345\"\n}",
+              "raw": "{\n  \"email\": \"admin@vedryxtech.com\",\n  \"password\": \"<set from your .env>\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -40,6 +40,26 @@ public class CallPolicy {
     @Field("recording_enabled")
     private Boolean recordingEnabled = Boolean.TRUE;
 
+    // The three below govern what the agent may agree to on a call, not when it dials.
+    // They were hardcoded in the voice agent, so a manager changing policy here changed
+    // nothing about what the lead was promised.
+
+    /** Earliest local time a site visit may be booked for, {@code HH:mm}. */
+    @Field("visiting_hours_start")
+    private String visitingHoursStart = "10:00";
+
+    /** Latest local time a site visit may be booked for, {@code HH:mm}. */
+    @Field("visiting_hours_end")
+    private String visitingHoursEnd = "19:00";
+
+    /** How far ahead a visit or callback may be booked. */
+    @Field("booking_horizon_days")
+    private Integer bookingHorizonDays = 30;
+
+    /** How much notice the site needs before a visit. */
+    @Field("visit_notice_minutes")
+    private Integer visitNoticeMinutes = 30;
+
     public static CallPolicy defaults() {
         return new CallPolicy();
     }
@@ -90,6 +110,54 @@ public class CallPolicy {
 
     public boolean recordingEnabledOrDefault() {
         return recordingEnabled == null || recordingEnabled;
+    }
+
+    public LocalTime visitingHoursStartOrDefault() {
+        return parseOrDefault(visitingHoursStart, LocalTime.of(10, 0));
+    }
+
+    public LocalTime visitingHoursEndOrDefault() {
+        return parseOrDefault(visitingHoursEnd, LocalTime.of(19, 0));
+    }
+
+    public int bookingHorizonDaysOrDefault() {
+        return bookingHorizonDays == null || bookingHorizonDays < 1 ? 30 : bookingHorizonDays;
+    }
+
+    public int visitNoticeMinutesOrDefault() {
+        return visitNoticeMinutes == null || visitNoticeMinutes < 0 ? 30 : visitNoticeMinutes;
+    }
+
+    public String getVisitingHoursStart() {
+        return visitingHoursStart;
+    }
+
+    public void setVisitingHoursStart(String visitingHoursStart) {
+        this.visitingHoursStart = visitingHoursStart;
+    }
+
+    public String getVisitingHoursEnd() {
+        return visitingHoursEnd;
+    }
+
+    public void setVisitingHoursEnd(String visitingHoursEnd) {
+        this.visitingHoursEnd = visitingHoursEnd;
+    }
+
+    public Integer getBookingHorizonDays() {
+        return bookingHorizonDays;
+    }
+
+    public void setBookingHorizonDays(Integer bookingHorizonDays) {
+        this.bookingHorizonDays = bookingHorizonDays;
+    }
+
+    public Integer getVisitNoticeMinutes() {
+        return visitNoticeMinutes;
+    }
+
+    public void setVisitNoticeMinutes(Integer visitNoticeMinutes) {
+        this.visitNoticeMinutes = visitNoticeMinutes;
     }
 
     public Integer getMaxAttempts() {

@@ -15,7 +15,7 @@ Content-Type: application/json
 
 {
   "email": "admin@vedryxtech.com",
-  "password": "Admin@12345"
+  "password": "{{adminPassword}}"
 }
 
 > {% client.global.set("token", response.body.accessToken); %}
@@ -301,7 +301,7 @@ Authorization: Bearer {{token}}
 ### The voice-agent application uses a key instead of logging in.
 ### The default key is created on first start; rotate it with the endpoint below.
 
-@apiKey = vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+@apiKey = <BOOTSTRAP_API_KEY from your .env>
 
 ### Agent reads the lead list - no login involved
 GET {{api}}/leads?size=5

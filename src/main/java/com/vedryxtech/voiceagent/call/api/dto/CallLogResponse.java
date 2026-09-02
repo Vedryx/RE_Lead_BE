@@ -6,6 +6,7 @@ import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -32,6 +33,9 @@ public record CallLogResponse(
         RecordingStatus recordingStatus,
         String recordingUrl,
         Integer recordingDurationSeconds,
+        @Schema(description = "Never written. Declared on the document and mapped here, "
+                + "but setTranscriptUrl has no callers — the agent keeps no transcript "
+                + "and the summary is the record of what was said.")
         String transcriptUrl,
         String summary,
         String notes,

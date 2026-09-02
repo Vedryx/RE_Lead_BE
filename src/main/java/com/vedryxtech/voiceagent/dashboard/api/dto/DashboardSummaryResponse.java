@@ -2,6 +2,7 @@ package com.vedryxtech.voiceagent.dashboard.api.dto;
 
 import com.vedryxtech.voiceagent.dashboard.domain.DashboardRange;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -15,6 +16,10 @@ public record DashboardSummaryResponse(
         Window window,
         Totals totals,
         CallStats calls,
+        @Schema(description = "How the funnel actually looks: new, followUp, "
+                + "callbackRequested, siteVisit, discarded")
+        List<CountBucket> byStage,
+
         List<CountBucket> byPipelineStatus,
         List<CountBucket> byFinalStatus,
         List<CountBucket> byActionType,
@@ -58,6 +63,11 @@ public record DashboardSummaryResponse(
             double connectRatePercent,
             long totalTalkSeconds,
             double averageTalkSeconds,
+            @Schema(description = "Always 0 today. Recording is switched on at the LiveKit "
+                    + "Cloud project level, but Cloud session recordings are not exposed "
+                    + "through the Egress API, so no playable URL reaches recordingUrl. "
+                    + "Populating this needs an explicit RoomCompositeEgress writing to "
+                    + "storage we control. Do not build a dashboard widget on it yet.")
             long recordingsAvailable,
             long attemptsToday,
             long connectedToday

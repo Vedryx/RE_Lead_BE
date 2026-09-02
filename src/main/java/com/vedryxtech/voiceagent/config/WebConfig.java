@@ -5,6 +5,7 @@ import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import com.vedryxtech.voiceagent.dashboard.domain.DashboardRange;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
@@ -29,6 +30,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addConverter(String.class, LeadStatus.class, LeadStatus::fromValue);
         registry.addConverter(String.class, LeadPipelineStatus.class, LeadPipelineStatus::fromValue);
         registry.addConverter(String.class, LeadFinalStatus.class, LeadFinalStatus::fromValue);
+        registry.addConverter(String.class, LeadStage.class, LeadStage::fromValue);
         registry.addConverter(String.class, CallOutcome.class, CallOutcome::fromValue);
         registry.addConverter(String.class, CallDisposition.class, CallDisposition::fromValue);
         registry.addConverter(String.class, RecordingStatus.class, RecordingStatus::fromValue);

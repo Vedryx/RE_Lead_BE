@@ -1,6 +1,7 @@
 package com.vedryxtech.voiceagent.call.api.dto;
 
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
+import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -25,6 +26,14 @@ public record CallOutcomeRequest(
 
         @Schema(example = "siteVisitBooked", description = "What the person said. Required when outcome is answered.")
         CallDisposition disposition,
+
+        @Schema(example = "followUpCall",
+                description = "Which action was agreed. Distinguishes a callback the agent "
+                        + "will make itself (followUpCall) from one handed to a person "
+                        + "(teamCallback) — both arrive as disposition callbackRequested, "
+                        + "and without this the backend has to guess. Optional: omitted, a "
+                        + "callback is treated as teamCallback, as it always has been.")
+        ActionType actionType,
 
         @PositiveOrZero
         @Schema(example = "18")

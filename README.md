@@ -101,7 +101,7 @@ You'll see a list of everything the system can do, grouped into four numbered se
 1. Open the green **`POST /api/v1/auth/login`** row.
 2. Click **Try it out**, then **Execute** — the example is already filled in with:
    ```json
-   { "email": "admin@vedryxtech.com", "password": "Admin@12345" }
+   { "email": "<BOOTSTRAP_ADMIN_EMAIL>", "password": "<BOOTSTRAP_ADMIN_PASSWORD>" }
    ```
 3. In the response, find `"accessToken"` and copy the long string between the quotes.
 4. Scroll to the top and click the **Authorize** button (the padlock).
@@ -174,13 +174,13 @@ request.
 The key is created for you on first start:
 
 ```
-vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+<BOOTSTRAP_API_KEY from your .env>
 ```
 
 The agent sends it as a header on every call:
 
 ```
-X-API-Key: vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+X-API-Key: <BOOTSTRAP_API_KEY from your .env>
 ```
 
 That's the whole flow — no login step, no expiry. With it, the agent can read leads, add new
@@ -431,8 +431,8 @@ local values. The ones worth knowing:
 | `spring.data.mongodb.uri` | local database | Where the data is stored |
 | `app.security.jwt-secret` | a development key | **Change before real use** |
 | `app.security.bootstrap.admin-email` | `admin@vedryxtech.com` | The first login created |
-| `app.security.bootstrap.admin-password` | `Admin@12345` | **Change before real use** |
-| `app.security.bootstrap.api-key` | `vdx_local_dev_key_...` | **Change before real use** |
+| `app.security.bootstrap.admin-password` | `${BOOTSTRAP_ADMIN_PASSWORD}` | from `.env`, no default — the app will not start without it |
+| `app.security.bootstrap.api-key` | `${BOOTSTRAP_API_KEY}` | from `.env`, no default |
 | `app.security.bootstrap.seed-leads` | `true` | Loads the 14 sample leads. Set `false` for your own data |
 | `app.dialer.scheduler-enabled` | `false` | Background sweep for stuck calls. Off: nothing runs on a timer |
 

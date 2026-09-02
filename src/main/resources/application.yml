@@ -6,8 +6,8 @@
 #
 #  Then open  http://localhost:8082/swagger-ui.html
 #
-#  Log in with        admin@vedryxtech.com / Admin@12345
-#  AI agent API key   vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+#  Credentials come from .env (see .env.example) — they are not in this file
+#  and not in the repository. Copy .env.example to .env and fill it in.
 #
 #  Every value below is a real, working local value. Change the ones marked
 #  CHANGE BEFORE PRODUCTION before this runs anywhere other than a laptop.
@@ -20,7 +20,7 @@ spring:
   data:
     mongodb:
       # Local MongoDB on the default port. The database is created on first write.
-      uri: mongodb://localhost:27017/vedryx_voice_agent
+      uri: ${MONGODB_URI:mongodb://localhost:27017/vedryx_voice_agent}
       auto-index-creation: true
     web:
       pageable:
@@ -42,8 +42,9 @@ server:
 
 app:
   security:
-    # CHANGE BEFORE PRODUCTION. Must be at least 32 characters.
-    jwt-secret: vedryxtech-local-development-signing-key-32plus
+    # Read from the environment. No default: the app must not start with a
+    # signing key someone could read in a repository. See .env.example.
+    jwt-secret: ${JWT_SECRET}
     issuer: vedryxtech-voice-agent
     access-token-ttl: 12h
 
@@ -56,24 +57,25 @@ app:
       organization-slug: vedryx-tech
       timezone: Asia/Kolkata
 
-      # CHANGE BEFORE PRODUCTION.
-      admin-email: admin@vedryxtech.com
-      admin-password: Admin@12345
+      admin-email: ${BOOTSTRAP_ADMIN_EMAIL:admin@vedryxtech.com}
+      admin-password: ${BOOTSTRAP_ADMIN_PASSWORD}
       admin-name: Vedryx Admin
 
       # The key the AI voice agent sends as the X-API-Key header.
-      # CHANGE BEFORE PRODUCTION, or rotate it with POST /api/v1/api-keys/current
-      api-key: vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+      # Rotate with POST /api/v1/api-keys/current.
+      api-key: ${BOOTSTRAP_API_KEY}
 
-      # Loads the 14 sample leads from seed/leads.json so there is something to look at.
-      # Set to false once you have your own data.
-      seed-leads: true
+      # Would load sample leads from seed/leads.json — that file was never
+      # committed, so this does nothing today. Kept false so that adding the
+      # file later cannot feed test rows to a live dialler.
+      seed-leads: false
 
   dialer:
     # Background sweep that returns calls abandoned mid-dial to the queue.
-    # Off: nothing runs on a timer. Trigger it yourself with POST /api/v1/call-queue/recoveries.
-    # This never placed calls - the dialler pulls work from POST /api/v1/call-queue/claims.
-    scheduler-enabled: false
+    # On from Phase 3: an automatic dialler means leads get stranded in "dialing"
+    # when a worker dies, and only this sweep frees them. It still never places a
+    # call - the dialler pulls work from POST /api/v1/call-queue/claims.
+    scheduler-enabled: true
     maintenance-interval-ms: 60000
     maintenance-initial-delay-ms: 30000
     # How many leads one /call-queue/claims request may hand out.
