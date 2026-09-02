@@ -4,13 +4,12 @@
 #  Ready to run locally as-is:
 #      mvn spring-boot:run
 #
-#  Then open  http://localhost:8082/swagger-ui.html
+#  Then open  http://localhost:8082/docs
 #
-#  Credentials come from .env (see .env.example) — they are not in this file
-#  and not in the repository. Copy .env.example to .env and fill it in.
+#  Runtime credentials are defined in this file for local startup.
 #
-#  Every value below is a real, working local value. Change the ones marked
-#  CHANGE BEFORE PRODUCTION before this runs anywhere other than a laptop.
+#  Every value below is a real, working local value. Change them before this
+#  runs anywhere other than a laptop.
 # ---------------------------------------------------------------------------
 
 spring:
@@ -19,9 +18,10 @@ spring:
 
   data:
     mongodb:
-      # Local MongoDB on the default port. The database is created on first write.
-      uri: ${MONGODB_URI:mongodb://localhost:27017/vedryx_voice_agent}
+      # Atlas MongoDB connection for the highRise_voice database.
+      uri: mongodb+srv://signup_db_user:8koQ37zT4rkclnHU@highrise.3mnzjys.mongodb.net/highRise_voice?retryWrites=true&w=majority&appName=highRise
       auto-index-creation: true
+
     web:
       pageable:
         default-page-size: 20
@@ -42,9 +42,8 @@ server:
 
 app:
   security:
-    # Read from the environment. No default: the app must not start with a
-    # signing key someone could read in a repository. See .env.example.
-    jwt-secret: ${JWT_SECRET}
+    # Local HS256 secret. Must remain at least 32 characters long.
+    jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g
     issuer: vedryxtech-voice-agent
     access-token-ttl: 12h
 
@@ -57,13 +56,13 @@ app:
       organization-slug: vedryx-tech
       timezone: Asia/Kolkata
 
-      admin-email: ${BOOTSTRAP_ADMIN_EMAIL:admin@vedryxtech.com}
-      admin-password: ${BOOTSTRAP_ADMIN_PASSWORD}
+      admin-email: admin@vedryxtech.com
+      admin-password: CSPamk2OJCwP160CAa1!
       admin-name: Vedryx Admin
 
       # The key the AI voice agent sends as the X-API-Key header.
       # Rotate with POST /api/v1/api-keys/current.
-      api-key: ${BOOTSTRAP_API_KEY}
+      api-key: vdx_bed0f54ab00fb4f617883360092c9bb78b2e0992
 
       # Would load sample leads from seed/leads.json — that file was never
       # committed, so this does nothing today. Kept false so that adding the
@@ -74,12 +73,12 @@ app:
   # Off by default — with no bucket the CRM still records calls and transcripts in
   # Mongo, it simply has no archive to point at.
   storage:
-    enabled: ${R2_ENABLED:false}
-    endpoint: ${R2_ENDPOINT:}
+    enabled: true
+    endpoint: https://18a1780405889a1f6ab9ede96f6d6fd1.r2.cloudflarestorage.com
     region: auto
-    bucket: ${R2_BUCKET:}
-    access-key: ${R2_ACCESS_KEY:}
-    secret-key: ${R2_SECRET_KEY:}
+    bucket: highrise-recordings
+    access-key: 09878cb8ca5ac86d5aaeef2460d7268e
+    secret-key: 1319f81483db49acbaad323c3bcacff76ebca28a211cf4e8d53a2f2a9920b6a1
     prefix: recordings
     # A presigned URL is a bearer token. Long enough to press play, short enough
     # that one pasted into a chat is dead before it travels.
@@ -100,7 +99,7 @@ app:
 
 springdoc:
   swagger-ui:
-    path: /swagger-ui.html
+    path: /docs
     tags-sorter: alpha
     operations-sorter: method
     display-request-duration: true

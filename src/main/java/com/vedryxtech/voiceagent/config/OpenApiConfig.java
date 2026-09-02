@@ -16,7 +16,7 @@ import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 /**
- * Swagger UI at {@code /swagger-ui.html}.
+ * Swagger UI at {@code /docs}.
  *
  * <p>The description doubles as the instructions for getting a credential, since everything
  * except login and organization signup needs one.</p>
