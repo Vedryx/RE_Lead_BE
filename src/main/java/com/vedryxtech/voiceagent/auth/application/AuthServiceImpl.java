@@ -11,8 +11,6 @@ import com.vedryxtech.voiceagent.user.api.dto.UserResponse;
 import com.vedryxtech.voiceagent.exception.UnauthorizedException;
 import com.vedryxtech.voiceagent.user.mapper.AccountMapper;
 import com.vedryxtech.voiceagent.security.CurrentActor;
-import com.vedryxtech.voiceagent.auth.application.AccessTokenService;
-import com.vedryxtech.voiceagent.auth.application.AuthService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import com.vedryxtech.voiceagent.user.application.UserService;
 import org.slf4j.Logger;

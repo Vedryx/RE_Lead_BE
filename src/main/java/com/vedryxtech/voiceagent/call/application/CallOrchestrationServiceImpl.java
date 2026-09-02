@@ -2,6 +2,7 @@ package com.vedryxtech.voiceagent.call.application;
 
 import com.vedryxtech.voiceagent.config.CallPolicyProperties;
 import com.vedryxtech.voiceagent.lead.domain.ActionType;
+import com.vedryxtech.voiceagent.call.api.dto.CallContext;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallEvent;
 import com.vedryxtech.voiceagent.call.domain.CallEventType;
@@ -11,6 +12,7 @@ import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 import com.vedryxtech.voiceagent.organization.domain.Organization;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
@@ -22,8 +24,9 @@ import com.vedryxtech.voiceagent.exception.InvalidStateTransitionException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.call.persistence.LeadCallLogRepository;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
+import com.vedryxtech.voiceagent.storage.CallArtifactService;
+import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import com.vedryxtech.voiceagent.security.CurrentActor;
-import com.vedryxtech.voiceagent.call.application.CallOrchestrationService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
@@ -37,13 +40,13 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -62,6 +65,21 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private static final String SYSTEM_DIRECTION = "system";
 
     /** Statuses the dialler is allowed to pick up. */
+    /**
+     * Stages the agent may dial, whatever the schedule says. A lead a human has moved on
+     * — to CALLBACK_REQUESTED, SITE_VISIT or DISCARDED — is theirs, and an agent dialling
+     * in behind them contradicts a colleague in front of a customer.
+     *
+     * <p>This is a second, independent filter. {@code stage} answers "may the agent speak
+     * to this person at all"; {@code pipelineStatus} answers "is there work due now".
+     * Note CALLBACK_SCHEDULED is claimable and is set for both kinds of callback, so
+     * without the stage filter a lead handed to a person would be dialled the moment
+     * their callback time arrived.
+     */
+    private static final List<String> AGENT_CALLABLE_STAGES = List.of(
+            LeadStage.NEW.getValue(),
+            LeadStage.FOLLOW_UP.getValue());
+
     private static final List<String> CLAIMABLE = List.of(
             LeadPipelineStatus.NEW.getValue(),
             LeadPipelineStatus.QUEUED.getValue(),
@@ -74,19 +92,22 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private final MongoTemplate mongoTemplate;
     private final CallPolicyProperties dialerProperties;
     private final CurrentActor currentActor;
+    private final CallArtifactService artifacts;
 
     public CallOrchestrationServiceImpl(LeadRepository leadRepository,
                                         LeadCallLogRepository callLogRepository,
                                         OrganizationService organizationService,
                                         MongoTemplate mongoTemplate,
                                         CallPolicyProperties dialerProperties,
-                                        CurrentActor currentActor) {
+                                        CurrentActor currentActor,
+                                        CallArtifactService artifacts) {
         this.leadRepository = leadRepository;
         this.callLogRepository = callLogRepository;
         this.organizationService = organizationService;
         this.mongoTemplate = mongoTemplate;
         this.dialerProperties = dialerProperties;
         this.currentActor = currentActor;
+        this.artifacts = artifacts;
     }
 
     // ------------------------------------------------------------------ claim
@@ -99,7 +120,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         int batch = Math.min(Math.max(limit, 1), dialerProperties.getBatchSize());
         List<CallSession> sessions = new ArrayList<>(batch);
 
-        for (int i = 0; i < batch; i++) {
+        // "Call now" first: a person is watching a button and expects the phone to ring,
+        // and these bypass both the schedule and the stage gate on purpose.
+        sessions.addAll(claimUndialledAttempts(batch, policy));
+
+        for (int i = sessions.size(); i < batch; i++) {
             Lead claimed = claimOne();
             if (claimed == null) {
                 break;
@@ -109,7 +134,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 deferToNextWindow(claimed, organization, policy);
                 continue;
             }
-            sessions.add(openAttempt(claimed, organization, policy, null, AI_AGENT, null));
+            sessions.add(openAttempt(claimed, organization, policy, null, AI_AGENT, null, true));
         }
 
         log.debug("Claimed {} lead(s)", sessions.size());
@@ -124,7 +149,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         Date now = Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant());
 
         Query query = Query.query(Criteria.where("do_not_call").ne(Boolean.TRUE)
+                        .and("stage").in(AGENT_CALLABLE_STAGES)
                         .and("pipeline_status").in(CLAIMABLE)
+                        .and("project").nin(NO_PROJECT)
                         .and("next_attempt_at").lte(now))
                 .with(Sort.by(Sort.Direction.ASC, "next_attempt_at"));
 
@@ -167,6 +194,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             }
         }
 
+        // No daily-cap check here, deliberately. claimNext defers a lead over
+        // maxAttemptsPerDay; a person pressing the button has decided this one is worth
+        // an extra call, and the cap exists to stop us pestering people automatically.
         lead.setPipelineStatus(LeadPipelineStatus.DIALING);
         lead.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         lead = leadRepository.save(lead);
@@ -175,13 +205,123 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 ? request.handledBy()
                 : currentActor.actor();
 
+        // dialStarting = false: this queues the call, it does not place it. The dialler
+        // claims it on its next pass, which is why startCall answers 202 and not 200.
         return openAttempt(lead, organization, policy, idempotencyKey, handledBy,
-                request == null ? null : request.recordingEnabled());
+                request == null ? null : request.recordingEnabled(), false);
+    }
+
+    /** How many earlier calls reach the prompt. Three is enough to sound like someone
+     *  who remembers, and it bounds what goes into a frozen system instruction. */
+    private static final int PRIOR_CALLS_IN_CONTEXT = 3;
+
+    /** A lead with no project names no knowledge base, so the agent has nothing to say.
+     *  Handing one out would mark it dialing, get refused, and come back on the next
+     *  sweep for ever. Leaving it unclaimed makes it visible in the CRM instead. */
+    private static final List<Object> NO_PROJECT = Arrays.asList("", null);
+
+    /**
+     * What the agent should know before it dials.
+     *
+     * <p>Only calls that actually happened count: the audit rows a reschedule writes have
+     * no outcome and would read as a silent conversation.
+     */
+    /**
+     * Keep what was said, in both places it belongs.
+     *
+     * <p>Mongo is the index — it makes the words searchable. The archive copy beside the
+     * audio is written later, once the outcome is fully decided, so the file carries the
+     * disposition rather than a null.
+     */
+    private void keepTranscript(LeadCallLog callLog, CallOutcomeRequest request) {
+        if (request.transcript() == null || request.transcript().isEmpty()) {
+            return;
+        }
+        List<TranscriptTurn> turns = request.transcript().stream()
+                .map(turn -> new TranscriptTurn(turn.role(), turn.text(), turn.atSeconds()))
+                .toList();
+        callLog.setTranscript(turns);
+        // The agent sends the count before truncation. Falling back to what arrived keeps
+        // the field honest rather than absent when an older agent posts.
+        callLog.setTranscriptTurnCount(request.transcriptTurnCount() != null
+                ? request.transcriptTurnCount()
+                : turns.size());
+        callLog.addEvent(CallEvent.of(CallEventType.HANGUP,
+                "Transcript captured: " + turns.size() + " turn(s)"));
+    }
+
+    private CallContext contextFor(Lead lead, LeadCallLog current) {
+        List<CallContext.PriorCall> priors = callLogRepository
+                .findByLeadIdOrderByAttemptNumberDesc(lead.getId()).stream()
+                .filter(log -> current == null || !log.getId().equals(current.getId()))
+                .filter(log -> log.getOutcome() != null)
+                .limit(PRIOR_CALLS_IN_CONTEXT)
+                .map(log -> new CallContext.PriorCall(
+                        log.getEndedAt(), log.getOutcome(), log.getDisposition(), log.getSummary()))
+                .toList();
+
+        return new CallContext(
+                lead.getProject(),
+                lead.stageOrNew(),
+                lead.getActionType(),
+                lead.getScheduledFor(),
+                lead.getCallbackAt(),
+                lead.getQuery(),
+                lead.getWhatsappPhone(),
+                orZero(lead.getAttemptCount()),
+                orZero(lead.getConnectedCount()),
+                priors);
+    }
+
+    /**
+     * Hand out attempts that exist but nobody has dialled — the rows "Call now" creates.
+     *
+     * <p>Single-shot the same way the scheduled path is: {@code findAndModify} stamps
+     * {@code dial_started_at} as it returns the row, so a second dialler sees it taken.
+     *
+     * <p>Two filters matter as much as the null check. {@code direction = outbound}
+     * excludes the audit rows {@code reschedule()} writes, which also carry no
+     * timestamps — without it, every manual reschedule would dial the lead. And the
+     * staleness bound stops an attempt orphaned by a dead dialler being picked up hours
+     * later, ringing someone about a button pressed that morning.
+     */
+    private List<CallSession> claimUndialledAttempts(int limit, CallPolicy policy) {
+        List<CallSession> sessions = new ArrayList<>();
+        Date floor = Date.from(OffsetDateTime.now(ZoneOffset.UTC)
+                .minusMinutes(dialerProperties.getStaleDialMinutes()).toInstant());
+
+        for (int i = 0; i < limit; i++) {
+            Date now = Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant());
+            Query query = Query.query(Criteria.where("dial_started_at").is(null)
+                            .and("ended_at").is(null)
+                            .and("direction").is("outbound")
+                            .and("created_at").gt(floor))
+                    .with(Sort.by(Sort.Direction.ASC, "created_at"));
+
+            LeadCallLog claimed = mongoTemplate.findAndModify(
+                    query, new Update().set("dial_started_at", now).set("updated_at", now),
+                    FindAndModifyOptions.options().returnNew(true), LeadCallLog.class);
+            if (claimed == null) {
+                break;
+            }
+            Lead lead = leadRepository.findById(claimed.getLeadId()).orElse(null);
+            if (lead == null) {
+                continue;
+            }
+            sessions.add(new CallSession(lead, claimed,
+                    claimed.getRecordingStatus() != null || policy.recordingEnabledOrDefault(),
+                    contextFor(lead, claimed)));
+        }
+        if (!sessions.isEmpty()) {
+            log.info("Handed out {} manually started call(s) ahead of the schedule", sessions.size());
+        }
+        return sessions;
     }
 
     /** Creates the {@code leads_log} row for one attempt. */
     private CallSession openAttempt(Lead lead, Organization organization, CallPolicy policy,
-                                    String idempotencyKey, String handledBy, Boolean recordingOverride) {
+                                    String idempotencyKey, String handledBy,
+                                    Boolean recordingOverride, boolean dialStarting) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         int attemptNumber = lead.attemptCountOrZero() + 1;
         boolean recordingEnabled = recordingOverride != null
@@ -199,7 +339,13 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         callLog.setDirection("outbound");
         callLog.setPipelineStatusBefore(lead.getPipelineStatus());
         callLog.setQueuedAt(lead.getNextAttemptAt() != null ? lead.getNextAttemptAt() : now);
-        callLog.setDialStartedAt(now);
+        // Only stamped when a dialler is actually taking the row. "Call now" opens an
+        // attempt nobody has dialled yet, and a null dial_started_at is exactly how the
+        // dialler finds it. Stamping here would make every attempt look already-taken,
+        // and the manual queue would return nothing forever.
+        if (dialStarting) {
+            callLog.setDialStartedAt(now);
+        }
         callLog.setCreatedAt(now);
         callLog.setUpdatedAt(now);
         callLog.addEvent(CallEvent.of(CallEventType.DIAL_STARTED, "Attempt " + attemptNumber + " started")
@@ -211,6 +357,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         }
 
         LeadCallLog saved = callLogRepository.save(callLog);
+        // The id only exists after the first save, and both keys are built from it. Doing
+        // this now rather than at teardown is what lets the agent tell egress where to put
+        // the audio instead of learning the location from a webhook minutes later.
+        artifacts.assignKeys(saved, lead.getProject());
+        saved = callLogRepository.save(saved);
 
         lead.setPipelineStatus(LeadPipelineStatus.DIALING);
         lead.setAttemptCount(attemptNumber);
@@ -227,7 +378,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         boolean recordingEnabled = request != null && request.recordingEnabled() != null
                 ? request.recordingEnabled()
                 : policy.recordingEnabledOrDefault();
-        return new CallSession(lead, callLog, recordingEnabled);
+        return new CallSession(lead, callLog, recordingEnabled, contextFor(lead, callLog));
     }
 
     // ----------------------------------------------------------------- outcome
@@ -265,6 +416,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             callLog.setRecordingReadyAt(now);
             lead.setLastRecordingUrl(request.recordingUrl());
         }
+        keepTranscript(callLog, request);
         callLog.addEvent(CallEvent.of(CallEventType.HANGUP, "Call ended as " + outcome.getValue())
                 .with("talk_seconds", callLog.getTalkSeconds()));
 
@@ -289,6 +441,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 .with("final_status", lead.getFinalStatus() == null ? null : lead.getFinalStatus().getValue()));
 
         LeadCallLog savedLog = callLogRepository.save(callLog);
+        // Archived last, on the saved log: the file is meant to be readable without the
+        // database that produced it, and the disposition is only decided above this line.
+        artifacts.archiveTranscript(savedLog, savedLog.getTranscript());
         lead.setLastCallLogId(savedLog.getId());
         lead.setUpdatedAt(now);
         leadRepository.save(lead);
@@ -346,8 +501,16 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 }
                 lead.setActionType(ActionType.SITE_VISIT);
                 lead.setStatus(LeadStatus.SCHEDULED);
+                advanceStage(lead, LeadStage.SITE_VISIT);
                 lead.setScheduledFor(request.siteVisitAt());
                 lead.setConfirmedByLead(Boolean.TRUE);
+                // Reminders are a person's decision now, but they still need to know which
+                // visits are coming up. Nothing sets reminderEnabled on a lead the agent
+                // created, so without this reminderDueAt stays null by construction and the
+                // reminder worklist is empty for exactly the visits it exists to show.
+                if (lead.getReminderEnabled() == null) {
+                    lead.setReminderEnabled(Boolean.TRUE);
+                }
                 if (Boolean.TRUE.equals(lead.getReminderEnabled()) && lead.getReminderDueAt() == null) {
                     lead.setReminderDueAt(request.siteVisitAt().minusMinutes(30));
                 }
@@ -361,8 +524,26 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 // A callback the lead asked for is honoured regardless of the retry budget:
                 // the budget exists to stop us pestering people who never answer, not to cut
                 // off someone who is engaged and picked a time.
-                lead.setActionType(ActionType.TEAM_CALLBACK);
+                //
+                // Which kind of callback matters: one the agent will make itself keeps the
+                // lead in FOLLOW_UP and dialable, one handed to a person moves it to
+                // CALLBACK_REQUESTED where the agent must not touch it. The agent tells us
+                // in actionType; before that field existed this branch always guessed
+                // "team", so every agent follow-up was filed as a human's job.
+                ActionType callbackKind = request.actionType() == ActionType.FOLLOW_UP_CALL
+                        ? ActionType.FOLLOW_UP_CALL
+                        : ActionType.TEAM_CALLBACK;
+                lead.setActionType(callbackKind);
+                advanceStage(lead, callbackKind == ActionType.FOLLOW_UP_CALL
+                        ? LeadStage.FOLLOW_UP
+                        : LeadStage.CALLBACK_REQUESTED);
                 lead.setStatus(LeadStatus.SCHEDULED);
+                // FOLLOW_UP_CALL is the one ActionType whose validator demands scheduledFor
+                // (LeadServiceImpl.validate). The callback time is the scheduled time, so
+                // set both rather than leave the lead failing its own validation later.
+                if (callbackKind == ActionType.FOLLOW_UP_CALL) {
+                    lead.setScheduledFor(request.requestedCallbackAt());
+                }
                 lead.setCallbackAt(request.requestedCallbackAt());
                 lead.setConfirmedByLead(Boolean.TRUE);
                 lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
@@ -376,17 +557,36 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             case DETAILS_REQUESTED -> {
                 lead.setActionType(ActionType.WHATSAPP_PROJECT_DETAILS);
                 lead.setStatus(LeadStatus.REQUESTED);
+                advanceStage(lead, LeadStage.FOLLOW_UP);
                 if (lead.getWhatsappPhone() == null) {
                     lead.setWhatsappPhone(lead.getCallingPhone());
                 }
+                // Deliberately not closed. Asking for details is interest, not a decision,
+                // and closing here nulls nextAttemptAt so the lead would sit in FOLLOW_UP
+                // looking active and never be dialled again. Nothing sends the details
+                // yet either, so this lead is owed both a message and a call.
+                scheduleRetry(lead, callLog, CallOutcome.ANSWERED, organization, policy, now);
+            }
+            case INTERESTED -> {
+                // Interested but nothing agreed: still ours to chase, not a discard.
+                advanceStage(lead, LeadStage.FOLLOW_UP);
                 close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.INTERESTED);
             }
-            case INTERESTED -> close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.INTERESTED);
-            case NOT_INTERESTED -> close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.NOT_INTERESTED);
-            case UNQUALIFIED -> close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.UNQUALIFIED);
-            case WRONG_NUMBER -> close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.WRONG_NUMBER);
+            case NOT_INTERESTED -> {
+                advanceStage(lead, LeadStage.DISCARDED);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.NOT_INTERESTED);
+            }
+            case UNQUALIFIED -> {
+                advanceStage(lead, LeadStage.DISCARDED);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.UNQUALIFIED);
+            }
+            case WRONG_NUMBER -> {
+                advanceStage(lead, LeadStage.DISCARDED);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.WRONG_NUMBER);
+            }
             case DO_NOT_CALL -> {
                 lead.setDoNotCall(Boolean.TRUE);
+                advanceStage(lead, LeadStage.DISCARDED);
                 close(lead, LeadPipelineStatus.SUPPRESSED, LeadFinalStatus.DO_NOT_CALL);
             }
             case LANGUAGE_BARRIER, NO_DECISION ->
@@ -416,6 +616,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         int maxAttempts = policy.maxAttemptsOrDefault();
         if (lead.attemptCountOrZero() >= maxAttempts) {
             lead.setNextAttemptAt(null);
+            advanceStage(lead, LeadStage.DISCARDED);
             close(lead, LeadPipelineStatus.EXHAUSTED, LeadFinalStatus.UNREACHABLE);
             callLog.addEvent(CallEvent.of(CallEventType.RETRIES_EXHAUSTED,
                             "No answer after " + lead.attemptCountOrZero() + " attempts")
@@ -434,6 +635,14 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                         "Retry " + (lead.attemptCountOrZero() + 1) + " of " + maxAttempts)
                 .with("next_attempt_at", nextAttempt.toString())
                 .with("backoff_minutes", policy.backoffMinutesFor(outcome)));
+    }
+
+    /**
+     * Move the funnel stage for an agent-reported outcome. Ratcheted: forward or out,
+     * never backwards, so a missed reminder call cannot undo a booked visit.
+     */
+    private void advanceStage(Lead lead, LeadStage next) {
+        lead.setStage(lead.stageOrNew().advanceTo(next));
     }
 
     private void close(Lead lead, LeadPipelineStatus pipelineStatus, LeadFinalStatus finalStatus) {
@@ -462,7 +671,12 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
         lead.setFinalStatus(null);
         lead.setNextAttemptAt(scheduledAt);
-        lead.setActionType(ActionType.TEAM_CALLBACK);
+        // A person using this endpoint is booking a call, not volunteering to make one.
+        // Filing it as TEAM_CALLBACK would move the lead to CALLBACK_REQUESTED, which the
+        // agent may not dial — and then nobody would call at the time just agreed.
+        lead.setActionType(ActionType.FOLLOW_UP_CALL);
+        lead.setScheduledFor(request.requestedAt());
+        advanceStage(lead, LeadStage.FOLLOW_UP);
         lead.setStatus(LeadStatus.RESCHEDULED);
         lead.setCallbackAt(request.requestedAt());
         lead.setUpdatedAt(now);
@@ -517,8 +731,12 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     @Override
     public long dueCount() {
         Date now = Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant());
+        // Identical filter to the claim, or the count advertises work that will never
+        // be handed out.
         Query query = Query.query(Criteria.where("do_not_call").ne(Boolean.TRUE)
+                .and("stage").in(AGENT_CALLABLE_STAGES)
                 .and("pipeline_status").in(CLAIMABLE)
+                .and("project").nin(NO_PROJECT)
                 .and("next_attempt_at").lte(now));
         return mongoTemplate.count(query, Lead.class);
     }

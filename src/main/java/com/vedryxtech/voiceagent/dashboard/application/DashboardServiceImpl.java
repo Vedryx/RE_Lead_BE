@@ -6,6 +6,7 @@ import com.vedryxtech.voiceagent.dashboard.domain.DashboardRange;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.organization.domain.Organization;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
@@ -16,7 +17,6 @@ import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.DayB
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Totals;
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Window;
 import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
-import com.vedryxtech.voiceagent.dashboard.application.DashboardService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -80,6 +80,7 @@ public class DashboardServiceImpl implements DashboardService {
         Criteria attemptScope = windowed(Criteria.where("dial_started_at").ne(null),
                 "dial_started_at", window);
 
+        Map<String, Long> byStage = countBy(Lead.class, leadScope, "stage");
         Map<String, Long> byPipeline = countBy(Lead.class, leadScope, "pipeline_status");
         Map<String, Long> byFinal = countBy(Lead.class, leadScope, "final_status");
         Map<String, Long> byActionType = countBy(Lead.class, leadScope, "action_type");
@@ -93,6 +94,9 @@ public class DashboardServiceImpl implements DashboardService {
                 window,
                 buildTotals(leadScope, totalLeads, byPipeline, byFinal, now),
                 buildCallStats(attemptScope, byOutcome, zone, now),
+                // The funnel as a salesperson reads it. pipelineStatus below is machine
+                // state and answers a different question.
+                buckets(LeadStage.values(), LeadStage::getValue, byStage, totalLeads),
                 buckets(LeadPipelineStatus.values(), LeadPipelineStatus::getValue, byPipeline, totalLeads),
                 buckets(LeadFinalStatus.values(), LeadFinalStatus::getValue, byFinal, totalLeads),
                 actionTypeBuckets(byActionType, totalLeads),

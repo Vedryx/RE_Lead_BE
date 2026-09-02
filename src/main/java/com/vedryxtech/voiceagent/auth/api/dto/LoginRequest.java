@@ -12,7 +12,7 @@ public record LoginRequest(
         String email,
 
         @NotBlank(message = "password is required")
-        @Schema(example = "Admin@12345")
+        @Schema(description = "The BOOTSTRAP_ADMIN_PASSWORD from your .env")
         String password
 ) {
 }

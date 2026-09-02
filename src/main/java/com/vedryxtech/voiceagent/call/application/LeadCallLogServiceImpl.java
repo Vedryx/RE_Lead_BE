@@ -4,7 +4,6 @@ import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.call.persistence.LeadCallLogRepository;
-import com.vedryxtech.voiceagent.call.application.LeadCallLogService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.springframework.data.domain.Page;

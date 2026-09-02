@@ -93,6 +93,14 @@ public class Lead {
     @Field("final_status")
     private LeadFinalStatus finalStatus;
 
+    /**
+     * How far along the lead is, in sales terms. Derived from the same transition that
+     * sets pipelineStatus and finalStatus; never written independently. See LeadStage.
+     */
+    @Indexed(name = "idx_stage")
+    @Field("stage")
+    private LeadStage stage = LeadStage.NEW;
+
     /** Result of the most recent connected call. */
     @Field("last_disposition")
     private CallDisposition lastDisposition;
@@ -287,6 +295,19 @@ public class Lead {
 
     public LeadFinalStatus getFinalStatus() {
         return finalStatus;
+    }
+
+    public LeadStage getStage() {
+        return stage;
+    }
+
+    public void setStage(LeadStage stage) {
+        this.stage = stage;
+    }
+
+    /** The current stage, defaulting for rows written before the field existed. */
+    public LeadStage stageOrNew() {
+        return stage == null ? LeadStage.NEW : stage;
     }
 
     public void setFinalStatus(LeadFinalStatus finalStatus) {

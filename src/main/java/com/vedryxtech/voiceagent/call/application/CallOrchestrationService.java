@@ -60,7 +60,12 @@ public interface CallOrchestrationService {
     record CallSession(
             Lead lead,
             LeadCallLog callLog,
-            boolean recordingEnabled
+            boolean recordingEnabled,
+            com.vedryxtech.voiceagent.call.api.dto.CallContext context
     ) {
+        /** A session with no history yet — a first call, or a test. */
+        public CallSession(Lead lead, LeadCallLog callLog, boolean recordingEnabled) {
+            this(lead, callLog, recordingEnabled, null);
+        }
     }
 }

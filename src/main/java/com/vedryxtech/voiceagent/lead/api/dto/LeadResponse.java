@@ -4,6 +4,7 @@ import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 
@@ -37,6 +38,7 @@ public record LeadResponse(
         // call pipeline
         LeadPipelineStatus pipelineStatus,
         LeadFinalStatus finalStatus,
+        LeadStage stage,
         CallDisposition lastDisposition,
         CallOutcome lastOutcome,
         Integer attemptCount,

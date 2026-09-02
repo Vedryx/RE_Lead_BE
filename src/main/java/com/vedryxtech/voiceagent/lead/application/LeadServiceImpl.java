@@ -11,8 +11,6 @@ import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.lead.mapper.LeadMapper;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
-import com.vedryxtech.voiceagent.lead.application.LeadSearchCriteria;
-import com.vedryxtech.voiceagent.lead.application.LeadService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;
@@ -30,6 +28,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import java.util.regex.Pattern;
@@ -43,11 +42,14 @@ public class LeadServiceImpl implements LeadService {
     private final LeadRepository repository;
     private final MongoTemplate mongoTemplate;
     private final LeadMapper mapper;
+    private final LeadAuditService audit;
 
-    public LeadServiceImpl(LeadRepository repository, MongoTemplate mongoTemplate, LeadMapper mapper) {
+    public LeadServiceImpl(LeadRepository repository, MongoTemplate mongoTemplate, LeadMapper mapper,
+                           LeadAuditService audit) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
         this.mapper = mapper;
+        this.audit = audit;
     }
 
     // ------------------------------------------------------------------ create
@@ -75,10 +77,13 @@ public class LeadServiceImpl implements LeadService {
         }
 
         Lead lead = existing.get();
+        Map<String, Object> before = audit.snapshot(lead);
         mapper.applyFullUpdate(lead, request);
         applyDefaults(lead);
         validate(lead);
-        return new UpsertResult(persist(lead), false);
+        Lead saved = persist(lead);
+        audit.record(before, saved, "upsert");
+        return new UpsertResult(saved, false);
     }
 
     // -------------------------------------------------------------------- read
@@ -105,6 +110,14 @@ public class LeadServiceImpl implements LeadService {
         }
         if (criteria.pipelineStatus() != null) {
             filters.add(Criteria.where("pipeline_status").is(criteria.pipelineStatus().getValue()));
+        }
+        if (criteria.callbackBefore() != null) {
+            // "Waiting on a person": a callback whose time has come and gone. Invisible
+            // to the agent by design, and invisible to everyone else without this.
+            filters.add(Criteria.where("callback_at").lte(criteria.callbackBefore()));
+        }
+        if (criteria.stage() != null) {
+            filters.add(Criteria.where("stage").is(criteria.stage().getValue()));
         }
         if (criteria.finalStatus() != null) {
             filters.add(Criteria.where("final_status").is(criteria.finalStatus().getValue()));
@@ -150,23 +163,32 @@ public class LeadServiceImpl implements LeadService {
     @Override
     public Lead replace(String id, LeadRequest request) {
         Lead lead = getById(id);
+        Map<String, Object> before = audit.snapshot(lead);
         mapper.applyFullUpdate(lead, request);
         applyDefaults(lead);
         validate(lead);
         assertCallingPhoneFree(lead);
-        return persist(lead);
+        Lead saved = persist(lead);
+        audit.record(before, saved, "replace");
+        return saved;
     }
 
     @Override
     public Lead patch(String id, LeadPatchRequest request) {
         Lead lead = getById(id);
+        Map<String, Object> before = audit.snapshot(lead);
+        boolean wasSuppressed = lead.isDoNotCall();
         mapper.applyPatch(lead, request);
         applyDefaults(lead);
         validate(lead);
         assertCallingPhoneFree(lead);
+        LeadConsent.applyClearance(lead, wasSuppressed, request.doNotCallClearedReason());
         applySuppressionRules(lead);
-        return persist(lead);
+        Lead saved = persist(lead);
+        audit.record(before, saved, "patch");
+        return saved;
     }
+
 
     // ----------------------------------------------------------------- helpers
 
@@ -278,10 +300,7 @@ public class LeadServiceImpl implements LeadService {
     }
 
     private void applySuppressionRules(Lead lead) {
-        if (lead.isDoNotCall()) {
-            lead.setPipelineStatus(LeadPipelineStatus.SUPPRESSED);
-            lead.setNextAttemptAt(null);
-        }
+        LeadConsent.applySuppression(lead);
     }
 
     private Lead persist(Lead lead) {

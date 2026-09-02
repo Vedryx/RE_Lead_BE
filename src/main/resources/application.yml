@@ -4,13 +4,12 @@
 #  Ready to run locally as-is:
 #      mvn spring-boot:run
 #
-#  Then open  http://localhost:8082/swagger-ui.html
+#  Then open  http://localhost:8082/docs
 #
-#  Log in with        admin@vedryxtech.com / Admin@12345
-#  AI agent API key   vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+#  Runtime credentials are defined in this file for local startup.
 #
-#  Every value below is a real, working local value. Change the ones marked
-#  CHANGE BEFORE PRODUCTION before this runs anywhere other than a laptop.
+#  Every value below is a real, working local value. Change them before this
+#  runs anywhere other than a laptop.
 # ---------------------------------------------------------------------------
 
 spring:
@@ -19,9 +18,10 @@ spring:
 
   data:
     mongodb:
-      # Local MongoDB on the default port. The database is created on first write.
-      uri: mongodb://localhost:27017/vedryx_voice_agent
+      # Atlas MongoDB connection for the highRise_voice database.
+      uri: mongodb+srv://signup_db_user:8koQ37zT4rkclnHU@highrise.3mnzjys.mongodb.net/highRise_voice?retryWrites=true&w=majority&appName=highRise
       auto-index-creation: true
+
     web:
       pageable:
         default-page-size: 20
@@ -42,8 +42,8 @@ server:
 
 app:
   security:
-    # CHANGE BEFORE PRODUCTION. Must be at least 32 characters.
-    jwt-secret: vedryxtech-local-development-signing-key-32plus
+    # Local HS256 secret. Must remain at least 32 characters long.
+    jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g
     issuer: vedryxtech-voice-agent
     access-token-ttl: 12h
 
@@ -56,24 +56,40 @@ app:
       organization-slug: vedryx-tech
       timezone: Asia/Kolkata
 
-      # CHANGE BEFORE PRODUCTION.
       admin-email: admin@vedryxtech.com
-      admin-password: Admin@12345
+      admin-password: CSPamk2OJCwP160CAa1!
       admin-name: Vedryx Admin
 
       # The key the AI voice agent sends as the X-API-Key header.
-      # CHANGE BEFORE PRODUCTION, or rotate it with POST /api/v1/api-keys/current
-      api-key: vdx_local_dev_key_2f8a41c6b09d47e5ab3c
+      # Rotate with POST /api/v1/api-keys/current.
+      api-key: vdx_bed0f54ab00fb4f617883360092c9bb78b2e0992
 
-      # Loads the 14 sample leads from seed/leads.json so there is something to look at.
-      # Set to false once you have your own data.
-      seed-leads: true
+      # Would load sample leads from seed/leads.json — that file was never
+      # committed, so this does nothing today. Kept false so that adding the
+      # file later cannot feed test rows to a live dialler.
+      seed-leads: false
+
+  # Call artifacts: the audio and the transcript, one prefix per call.
+  # Off by default — with no bucket the CRM still records calls and transcripts in
+  # Mongo, it simply has no archive to point at.
+  storage:
+    enabled: true
+    endpoint: https://18a1780405889a1f6ab9ede96f6d6fd1.r2.cloudflarestorage.com
+    region: auto
+    bucket: highrise-recordings
+    access-key: 09878cb8ca5ac86d5aaeef2460d7268e
+    secret-key: 1319f81483db49acbaad323c3bcacff76ebca28a211cf4e8d53a2f2a9920b6a1
+    prefix: recordings
+    # A presigned URL is a bearer token. Long enough to press play, short enough
+    # that one pasted into a chat is dead before it travels.
+    link-ttl: 15m
 
   dialer:
     # Background sweep that returns calls abandoned mid-dial to the queue.
-    # Off: nothing runs on a timer. Trigger it yourself with POST /api/v1/call-queue/recoveries.
-    # This never placed calls - the dialler pulls work from POST /api/v1/call-queue/claims.
-    scheduler-enabled: false
+    # On from Phase 3: an automatic dialler means leads get stranded in "dialing"
+    # when a worker dies, and only this sweep frees them. It still never places a
+    # call - the dialler pulls work from POST /api/v1/call-queue/claims.
+    scheduler-enabled: true
     maintenance-interval-ms: 60000
     maintenance-initial-delay-ms: 30000
     # How many leads one /call-queue/claims request may hand out.
@@ -83,7 +99,7 @@ app:
 
 springdoc:
   swagger-ui:
-    path: /swagger-ui.html
+    path: /docs
     tags-sorter: alpha
     operations-sorter: method
     display-request-duration: true

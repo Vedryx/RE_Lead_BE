@@ -40,6 +40,7 @@ public record LeadRequest(
                 message = "phone must be 7-25 characters of digits, +, spaces, dashes or brackets")
         String phone,
 
+        @NotBlank(message = "project is required — it selects the knowledge the agent calls with")
         @Size(max = 200)
         @Schema(example = "My Home Sanctuary")
         String project,

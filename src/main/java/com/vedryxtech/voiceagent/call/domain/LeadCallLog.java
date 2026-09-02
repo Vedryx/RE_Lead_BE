@@ -93,6 +93,20 @@ public class LeadCallLog {
     @Field("talk_seconds")
     private Integer talkSeconds;
 
+    // -------------------------------------------------------------- transcript
+
+    /** What was said, oldest first. Redacted by the agent before it arrives. */
+    @Field("transcript")
+    private List<TranscriptTurn> transcript;
+
+    /** Turns before truncation. Greater than {@code transcript.size()} means trimmed. */
+    @Field("transcript_turn_count")
+    private Integer transcriptTurnCount;
+
+    /** Where the archive copy of the transcript sits in object storage. */
+    @Field("transcript_key")
+    private String transcriptKey;
+
     // -------------------------------------------------------------- recordings
 
     @Field("recording_status")
@@ -101,6 +115,14 @@ public class LeadCallLog {
     /** Playback URL handed to the dashboard player. Attached when the outcome is reported. */
     @Field("recording_url")
     private String recordingUrl;
+
+    /** The object key of the audio. The playable URL is minted from it on request. */
+    @Field("recording_key")
+    private String recordingKey;
+
+    /** The prefix both artifacts live under: one call, one folder-shaped key space. */
+    @Field("recording_prefix")
+    private String recordingPrefix;
 
     @Field("recording_duration_seconds")
     private Integer recordingDurationSeconds;
@@ -211,6 +233,46 @@ public class LeadCallLog {
 
     public void setAttemptNumber(Integer attemptNumber) {
         this.attemptNumber = attemptNumber;
+    }
+
+    public List<TranscriptTurn> getTranscript() {
+        return transcript;
+    }
+
+    public void setTranscript(List<TranscriptTurn> transcript) {
+        this.transcript = transcript;
+    }
+
+    public Integer getTranscriptTurnCount() {
+        return transcriptTurnCount;
+    }
+
+    public void setTranscriptTurnCount(Integer transcriptTurnCount) {
+        this.transcriptTurnCount = transcriptTurnCount;
+    }
+
+    public String getTranscriptKey() {
+        return transcriptKey;
+    }
+
+    public void setTranscriptKey(String transcriptKey) {
+        this.transcriptKey = transcriptKey;
+    }
+
+    public String getRecordingKey() {
+        return recordingKey;
+    }
+
+    public void setRecordingKey(String recordingKey) {
+        this.recordingKey = recordingKey;
+    }
+
+    public String getRecordingPrefix() {
+        return recordingPrefix;
+    }
+
+    public void setRecordingPrefix(String recordingPrefix) {
+        this.recordingPrefix = recordingPrefix;
     }
 
     public String getIdempotencyKey() {

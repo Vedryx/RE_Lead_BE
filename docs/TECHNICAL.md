@@ -25,8 +25,8 @@ leads. It is idempotent: restarting never overwrites what already exists.
 |---|---|
 | Swagger UI | `http://localhost:8080/swagger-ui.html` |
 | OpenAPI JSON | `http://localhost:8080/v3/api-docs` |
-| Admin login | `admin@vedryxtech.com` / `Admin@12345` |
-| Agent API key | `vdx_local_dev_key_2f8a41c6b09d47e5ab3c` |
+| Admin login | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` from `.env` |
+| Agent API key | `BOOTSTRAP_API_KEY` from `.env` |
 
 ## Collections
 

@@ -65,7 +65,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/auth/login", "/api/v1/organizations").permitAll()
                         // Swagger UI itself is public; the endpoints it calls still need credentials.
-                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**",
+                        .requestMatchers("/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers("/error").permitAll()

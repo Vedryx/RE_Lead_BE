@@ -21,5 +21,6 @@ public interface CallLogMapper {
     @Mapping(target = "phone", source = "lead.callingPhone")
     @Mapping(target = "name", source = "lead.name")
     @Mapping(target = "attemptNumber", source = "callLog.attemptNumber", qualifiedByName = "integerToInt")
+    @Mapping(target = "recordingKey", source = "callLog.recordingKey")
     CallSessionResponse toResponse(CallOrchestrationService.CallSession session);
 }

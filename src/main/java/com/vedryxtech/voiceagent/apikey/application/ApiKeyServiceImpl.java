@@ -2,7 +2,6 @@ package com.vedryxtech.voiceagent.apikey.application;
 
 import com.vedryxtech.voiceagent.organization.domain.Organization;
 import com.vedryxtech.voiceagent.organization.persistence.OrganizationRepository;
-import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import com.vedryxtech.voiceagent.lead.application.LeadAuditService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -57,6 +58,9 @@ class LeadControllerTest {
 
     @MockitoBean
     private LeadService service;
+
+    @MockitoBean
+    private LeadAuditService audit;
 
     @Test
     void createsAFreshLeadFromJustANameAndNumber() throws Exception {

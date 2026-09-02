@@ -7,7 +7,6 @@ import com.vedryxtech.voiceagent.organization.api.dto.RegisterOrganizationReques
 import com.vedryxtech.voiceagent.exception.DuplicateResourceException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.organization.persistence.OrganizationRepository;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
