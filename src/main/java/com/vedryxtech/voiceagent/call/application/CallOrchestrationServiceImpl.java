@@ -27,7 +27,6 @@ import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
 import com.vedryxtech.voiceagent.storage.CallArtifactService;
 import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import com.vedryxtech.voiceagent.security.CurrentActor;
-import com.vedryxtech.voiceagent.call.application.CallOrchestrationService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
@@ -41,7 +40,6 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;

@@ -11,8 +11,6 @@ import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.lead.mapper.LeadMapper;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
-import com.vedryxtech.voiceagent.lead.application.LeadSearchCriteria;
-import com.vedryxtech.voiceagent.lead.application.LeadService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;

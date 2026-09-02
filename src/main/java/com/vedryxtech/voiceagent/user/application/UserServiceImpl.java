@@ -6,7 +6,6 @@ import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
 import com.vedryxtech.voiceagent.exception.DuplicateResourceException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.user.persistence.UserRepository;
-import com.vedryxtech.voiceagent.user.application.UserService;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

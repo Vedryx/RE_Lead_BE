@@ -17,7 +17,6 @@ import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.DayB
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Totals;
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Window;
 import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
-import com.vedryxtech.voiceagent.dashboard.application.DashboardService;
 import com.vedryxtech.voiceagent.organization.application.OrganizationService;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;

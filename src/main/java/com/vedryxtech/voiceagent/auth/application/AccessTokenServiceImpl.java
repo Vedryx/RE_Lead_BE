@@ -5,7 +5,6 @@ import com.vedryxtech.voiceagent.organization.domain.Organization;
 import com.vedryxtech.voiceagent.user.domain.User;
 import com.vedryxtech.voiceagent.user.domain.UserRole;
 import com.vedryxtech.voiceagent.security.SecurityClaims;
-import com.vedryxtech.voiceagent.auth.application.AccessTokenService;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
