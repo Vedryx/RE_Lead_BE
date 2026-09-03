@@ -131,7 +131,19 @@ public class CallController {
         // a recording that is thirty seconds away.
         boolean finished = callLog.getRecordingStatus() != null
                 && callLog.getRecordingStatus().isPlayable();
-        String audioUrl = finished ? links.getOrDefault("audioUrl", "") : "";
+        // M-8: prefer the URL the agent posted on the outcome — that is the primary
+        // "playable" contract the README documents. Fall back to a freshly presigned R2
+        // link when egress wrote directly into the CRM's audio key. Without this a
+        // POSTed recording_url stored round-trips as an empty string.
+        String stored = callLog.getRecordingUrl();
+        String audioUrl;
+        if (!finished) {
+            audioUrl = "";
+        } else if (stored != null && !stored.isBlank()) {
+            audioUrl = stored;
+        } else {
+            audioUrl = links.getOrDefault("audioUrl", "");
+        }
         String transcriptUrl = links.getOrDefault("transcriptUrl", "");
 
         boolean hasTranscript = !transcriptUrl.isEmpty()

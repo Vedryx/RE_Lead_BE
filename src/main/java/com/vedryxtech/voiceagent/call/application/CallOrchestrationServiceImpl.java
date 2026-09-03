@@ -32,6 +32,7 @@ import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -40,6 +41,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -176,6 +178,22 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             throw new InvalidStateTransitionException(
                     "Lead " + lead.getIdAsString() + " is marked do_not_call and must not be dialled");
         }
+        // M-4: a discarded lead must not be dialled by a click. Un-discarding is a
+        // decision (notInterested / unqualified / wrongNumber all live here); the
+        // caller has to actively move the stage before "Call now" makes sense.
+        if (lead.stageOrNew().isTerminal()) {
+            throw new InvalidStateTransitionException(
+                    "Lead " + lead.getIdAsString() + " is discarded ("
+                            + (lead.getFinalStatus() == null ? "no final status" : lead.getFinalStatus().getValue())
+                            + "); move it to an active stage before dialling");
+        }
+        // M-5: a lead with no project names no knowledge base — the agent would answer to
+        // silence. claimOne already filters these out; refusing here closes the same gap on
+        // the "Call now" path so the button never queues an undiallable call.
+        if (lead.getProject() == null || lead.getProject().isBlank()) {
+            throw new InvalidStateTransitionException(
+                    "Lead " + lead.getIdAsString() + " has no project set; the agent has no knowledge base to load");
+        }
         if (lead.getPipelineStatus() != null && lead.getPipelineStatus().isActive()) {
             // Already dialling: hand back the open attempt rather than opening a second one.
             Optional<LeadCallLog> open = callLogRepository
@@ -260,6 +278,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                         log.getEndedAt(), log.getOutcome(), log.getDisposition(), log.getSummary()))
                 .toList();
 
+        // M-10: openAttempt has already incremented attemptCount for THIS call, so
+        // "attempts before this one" is attemptCount - 1. The previous formula returned
+        // attemptCount, making the agent open with "I tried you earlier" on a first call.
+        int previousAttempts = Math.max(0, orZero(lead.getAttemptCount()) - 1);
+
         return new CallContext(
                 lead.getProject(),
                 lead.stageOrNew(),
@@ -268,7 +291,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 lead.getCallbackAt(),
                 lead.getQuery(),
                 lead.getWhatsappPhone(),
-                orZero(lead.getAttemptCount()),
+                previousAttempts,
                 orZero(lead.getConnectedCount()),
                 priors);
     }
@@ -306,6 +329,13 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             }
             Lead lead = leadRepository.findById(claimed.getLeadId()).orElse(null);
             if (lead == null) {
+                continue;
+            }
+            // M-5 belt-and-braces: even if startCall lets it through, refuse to hand out
+            // a session whose context.project is empty. The agent would drop it silently.
+            if (lead.getProject() == null || lead.getProject().isBlank()) {
+                log.warn("Skipping call-now session {} for lead {}: no project on lead",
+                        claimed.getIdAsString(), lead.getIdAsString());
                 continue;
             }
             sessions.add(new CallSession(lead, claimed,
@@ -383,6 +413,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     // ----------------------------------------------------------------- outcome
 
+    /** How many times we re-read/re-apply the lead when someone else is editing it in parallel. */
+    private static final int LEAD_SAVE_RETRIES = 5;
+
     @Override
     public LeadCallLog recordOutcome(String callLogId, CallOutcomeRequest request) {
         AppSettings settings = settingsService.current();
@@ -394,64 +427,197 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                     "Attempt " + callLogId + " was already closed as " + callLog.getOutcome().getValue());
         }
 
-        Lead lead = leadRepository.findById(callLog.getLeadId())
-                .orElseThrow(() -> ResourceNotFoundException.lead("id", callLog.getLeadIdAsString()));
-
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         CallOutcome outcome = request.outcome();
 
-        callLog.setOutcome(outcome);
-        callLog.setEndedAt(now);
-        callLog.setUpdatedAt(now);
-        callLog.setRingSeconds(request.ringSeconds());
-        callLog.setTalkSeconds(request.talkSeconds() != null ? request.talkSeconds() : 0);
-        callLog.setSummary(request.summary());
-        callLog.setNotes(request.notes());
-        callLog.setErrorCode(request.errorCode());
-        callLog.setErrorMessage(request.errorMessage());
-        callLog.setRequestedCallbackAt(request.requestedCallbackAt());
-        if (request.recordingUrl() != null) {
-            callLog.setRecordingUrl(request.recordingUrl());
-            callLog.setRecordingStatus(RecordingStatus.AVAILABLE);
-            callLog.setRecordingReadyAt(now);
-            lead.setLastRecordingUrl(request.recordingUrl());
+        // Fail-fast validation before any writes (M-13 booking horizon + shape).
+        // Kept inside recordOutcome so a bad payload cannot poison the log or the lead.
+        validateBookingPolicy(request, settings, policy);
+
+        // Snapshot the mutable log fields the flow touches, so a retry after an
+        // OptimisticLockingFailureException on the LEAD does not double-append events
+        // or leave the log in a half-applied state.
+        List<CallEvent> eventsSnapshot = callLog.getEvents() == null
+                ? new ArrayList<>()
+                : new ArrayList<>(callLog.getEvents());
+        OffsetDateTime prevRetryScheduledFor = callLog.getRetryScheduledFor();
+        CallDisposition prevDisposition = callLog.getDisposition();
+
+        Lead lead = null;
+        int retriesLeft = LEAD_SAVE_RETRIES;
+
+        while (true) {
+            // Reset the log to the pre-loop snapshot, then re-run the branch below on
+            // a fresh read of the lead. Cheap; happens only when a benign concurrent
+            // edit (a CRM PATCH, say) has moved lead.version between our read and save.
+            callLog.setEvents(new ArrayList<>(eventsSnapshot));
+            callLog.setRetryScheduledFor(prevRetryScheduledFor);
+            callLog.setDisposition(prevDisposition);
+            callLog.setOutcome(null);
+            callLog.setEndedAt(null);
+
+            lead = leadRepository.findById(callLog.getLeadId())
+                    .orElseThrow(() -> ResourceNotFoundException.lead("id", callLog.getLeadIdAsString()));
+
+            // BLK-3: staleness. If the lead has already opened a newer attempt, this
+            // outcome belongs to a call that no longer represents the lead's state.
+            // Refuse with 409 so the agent's non-retryable branch drops it, rather than
+            // letting it demote a good lead the newer attempt will decide about.
+            if (callLog.getAttemptNumber() != null
+                    && lead.attemptCountOrZero() > callLog.getAttemptNumber()) {
+                throw new InvalidStateTransitionException(
+                        "Attempt " + callLog.getAttemptNumber()
+                                + " was superseded by attempt " + lead.attemptCountOrZero()
+                                + "; outcome not applied");
+            }
+
+            // Fields the log always carries about this outcome, regardless of the
+            // pipeline decision below.
+            callLog.setOutcome(outcome);
+            callLog.setEndedAt(now);
+            callLog.setUpdatedAt(now);
+            callLog.setRingSeconds(request.ringSeconds());
+            callLog.setTalkSeconds(request.talkSeconds() != null ? request.talkSeconds() : 0);
+            callLog.setSummary(request.summary());
+            callLog.setNotes(request.notes());
+            callLog.setErrorCode(request.errorCode());
+            callLog.setErrorMessage(request.errorMessage());
+            callLog.setRequestedCallbackAt(request.requestedCallbackAt());
+            if (request.recordingUrl() != null) {
+                callLog.setRecordingUrl(request.recordingUrl());
+                callLog.setRecordingStatus(RecordingStatus.AVAILABLE);
+                callLog.setRecordingReadyAt(now);
+                lead.setLastRecordingUrl(request.recordingUrl());
+            }
+            keepTranscript(callLog, request);
+            callLog.addEvent(CallEvent.of(CallEventType.HANGUP, "Call ended as " + outcome.getValue())
+                    .with("talk_seconds", callLog.getTalkSeconds()));
+
+            // BLK-3 ratchet: a lead already terminal (COMPLETED / EXHAUSTED / SUPPRESSED)
+            // is not re-litigated by a later attempt. A reminder call that rings out on a
+            // booked visit must move attempt counters and nothing else — never null a good
+            // final_status. The one exception is a DO_NOT_CALL request, which is safety data
+            // and always wins.
+            boolean freezePipeline = lead.isClosed() && !isSuppressionRequest(outcome, request);
+
+            if (freezePipeline) {
+                lead.setLastOutcome(outcome);
+                lead.setLastAttemptAt(now);
+                lead.setTotalTalkSeconds(orZero(lead.getTotalTalkSeconds()) + orZero(callLog.getTalkSeconds()));
+                if (outcome.isConnected()) {
+                    if (callLog.getAnsweredAt() == null) callLog.setAnsweredAt(now);
+                    lead.setConnectedCount(orZero(lead.getConnectedCount()) + 1);
+                    lead.setLastConnectedAt(now);
+                    // Log the disposition so history shows what happened without moving state.
+                    if (request.disposition() != null) {
+                        callLog.setDisposition(request.disposition());
+                        lead.setLastDisposition(request.disposition());
+                        callLog.addEvent(CallEvent.of(CallEventType.DISPOSITION_SET,
+                                request.disposition().getValue()));
+                    }
+                }
+                callLog.addEvent(CallEvent.of(CallEventType.OUTCOME_RECORDED,
+                                "Lead already closed as "
+                                        + (lead.getFinalStatus() == null ? lead.getPipelineStatus().getValue()
+                                            : lead.getFinalStatus().getValue())
+                                        + "; outcome logged, pipeline unchanged"));
+            } else {
+                applyLeadDetailsFromCall(lead, request);
+                lead.setLastOutcome(outcome);
+                lead.setLastAttemptAt(now);
+                lead.setTotalTalkSeconds(orZero(lead.getTotalTalkSeconds()) + orZero(callLog.getTalkSeconds()));
+
+                if (outcome.isConnected()) {
+                    if (callLog.getAnsweredAt() == null) callLog.setAnsweredAt(now);
+                    lead.setConnectedCount(orZero(lead.getConnectedCount()) + 1);
+                    lead.setLastConnectedAt(now);
+                    applyDisposition(lead, callLog, request, settings, policy, now);
+                } else {
+                    applyUnanswered(lead, callLog, outcome, settings, policy, now);
+                }
+            }
+
+            callLog.setPipelineStatusAfter(lead.getPipelineStatus());
+            callLog.addEvent(CallEvent.of(CallEventType.STATUS_CHANGED,
+                            "Lead moved to " + lead.getPipelineStatus().getValue())
+                    .with("final_status", lead.getFinalStatus() == null ? null : lead.getFinalStatus().getValue()));
+
+            // Persist the lead FIRST. If this fails on the @Version check, nothing has been
+            // committed and the log stays open — the agent's retry re-runs cleanly rather
+            // than hitting a permanent 409 on a half-applied outcome (this is BLK-2).
+            lead.setLastCallLogId(callLog.getId());
+            lead.setUpdatedAt(now);
+            try {
+                leadRepository.save(lead);
+                break;
+            } catch (OptimisticLockingFailureException ex) {
+                if (--retriesLeft < 0) {
+                    // Give up and ask the agent to retry (409, non-retryable in the client:
+                    // it drops the outcome. The log is still open, so a stray sweep can
+                    // eventually reclaim it, but no lead state was mis-written.)
+                    log.warn("Lead {} lost {} concurrent races applying outcome; asking client to retry",
+                            lead.getIdAsString(), LEAD_SAVE_RETRIES + 1);
+                    throw new InvalidStateTransitionException(
+                            "Lead is being edited concurrently. Retry the outcome — the call log is still open.");
+                }
+                // Brief, escalating backoff. Concurrent CRM edits usually settle in <100 ms.
+                try {
+                    Thread.sleep(20L + (LEAD_SAVE_RETRIES - retriesLeft) * 20L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new InvalidStateTransitionException("Interrupted while retrying outcome");
+                }
+            }
         }
-        keepTranscript(callLog, request);
-        callLog.addEvent(CallEvent.of(CallEventType.HANGUP, "Call ended as " + outcome.getValue())
-                .with("talk_seconds", callLog.getTalkSeconds()));
-
-        applyLeadDetailsFromCall(lead, request);
-
-        lead.setLastOutcome(outcome);
-        lead.setLastAttemptAt(now);
-        lead.setTotalTalkSeconds(orZero(lead.getTotalTalkSeconds()) + orZero(callLog.getTalkSeconds()));
-
-        if (outcome.isConnected()) {
-            callLog.setAnsweredAt(callLog.getAnsweredAt() != null ? callLog.getAnsweredAt() : now);
-            lead.setConnectedCount(orZero(lead.getConnectedCount()) + 1);
-            lead.setLastConnectedAt(now);
-            applyDisposition(lead, callLog, request, settings, policy, now);
-        } else {
-            applyUnanswered(lead, callLog, outcome, settings, policy, now);
-        }
-
-        callLog.setPipelineStatusAfter(lead.getPipelineStatus());
-        callLog.addEvent(CallEvent.of(CallEventType.STATUS_CHANGED,
-                        "Lead moved to " + lead.getPipelineStatus().getValue())
-                .with("final_status", lead.getFinalStatus() == null ? null : lead.getFinalStatus().getValue()));
 
         LeadCallLog savedLog = callLogRepository.save(callLog);
-        // Archived last, on the saved log: the file is meant to be readable without the
-        // database that produced it, and the disposition is only decided above this line.
+        // Archive LAST, after every durable write has succeeded. R2 is best-effort:
+        // Mongo already has the transcript, and CallArtifactService swallows RuntimeException,
+        // so a bucket outage cannot demote a good outcome to a 500.
         artifacts.archiveTranscript(savedLog, savedLog.getTranscript());
-        lead.setLastCallLogId(savedLog.getId());
-        lead.setUpdatedAt(now);
-        leadRepository.save(lead);
 
         log.info("Attempt {} for lead {} closed as {} -> lead is {}",
                 callLog.getAttemptNumber(), lead.getIdAsString(), outcome.getValue(),
                 lead.getPipelineStatus().getValue());
         return savedLog;
+    }
+
+    /** DO_NOT_CALL always wins, even against an already-terminal lead — it is safety data. */
+    private static boolean isSuppressionRequest(CallOutcome outcome, CallOutcomeRequest request) {
+        return outcome == CallOutcome.ANSWERED
+                && request.disposition() == CallDisposition.DO_NOT_CALL;
+    }
+
+    /**
+     * Reject a site-visit booking that violates the configured booking policy: past dates,
+     * dates beyond the booking horizon, or outside visiting hours (M-13). Callers see a 422.
+     */
+    private void validateBookingPolicy(CallOutcomeRequest request, AppSettings settings, CallPolicy policy) {
+        if (request.disposition() != CallDisposition.SITE_VISIT_BOOKED || request.siteVisitAt() == null) {
+            return;
+        }
+        OffsetDateTime siteVisitAt = request.siteVisitAt();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+        int notice = policy.visitNoticeMinutesOrDefault();
+        if (siteVisitAt.isBefore(now.plus(Duration.ofMinutes(notice)))) {
+            throw new InvalidLeadPayloadException(
+                    "siteVisitAt must be at least " + notice + " minutes in the future");
+        }
+        int horizonDays = policy.bookingHorizonDaysOrDefault();
+        if (siteVisitAt.isAfter(now.plusDays(horizonDays))) {
+            throw new InvalidLeadPayloadException(
+                    "siteVisitAt must be within " + horizonDays + " days of now");
+        }
+        ZoneId zone = zoneOf(settings);
+        LocalTime local = siteVisitAt.atZoneSameInstant(zone).toLocalTime();
+        LocalTime open = policy.visitingHoursStartOrDefault();
+        LocalTime close = policy.visitingHoursEndOrDefault();
+        if (local.isBefore(open) || local.isAfter(close)) {
+            throw new InvalidLeadPayloadException(
+                    "siteVisitAt " + local + " is outside visiting hours "
+                            + open + "-" + close + " (" + zone.getId() + ")");
+        }
     }
 
     /**
@@ -561,11 +727,13 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 if (lead.getWhatsappPhone() == null) {
                     lead.setWhatsappPhone(lead.getCallingPhone());
                 }
-                // Deliberately not closed. Asking for details is interest, not a decision,
-                // and closing here nulls nextAttemptAt so the lead would sit in FOLLOW_UP
-                // looking active and never be dialled again. Nothing sends the details
-                // yet either, so this lead is owed both a message and a call.
-                scheduleRetry(lead, callLog, CallOutcome.ANSWERED, settings, policy, now);
+                // Deliberately not closed. Asking for WhatsApp details is engagement, not a
+                // decision, and this call must not count against the retry budget — otherwise
+                // three engaged leads asking for a PDF get filed as UNREACHABLE (M-1's
+                // regression on top of M-1). Park the follow-up call on the standard answered
+                // backoff, skipping the exhaustion check that scheduleRetry runs.
+                parkFollowUp(lead, callLog, settings, policy, now,
+                        "Details requested; follow-up parked without spending an attempt");
             }
             case INTERESTED -> {
                 // Interested but nothing agreed: still ours to chase, not a discard.
@@ -599,28 +767,49 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private void applyUnanswered(Lead lead, LeadCallLog callLog, CallOutcome outcome,
                                  AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         if (outcome.isPermanentFailure()) {
+            // M-3: a permanent-failure outcome (invalidNumber) must move the stage to
+            // DISCARDED, matching the WRONG_NUMBER *disposition* branch below. Otherwise
+            // the funnel under-reports discards for the same business meaning.
+            advanceStage(lead, LeadStage.DISCARDED);
             close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.WRONG_NUMBER);
             callLog.addEvent(CallEvent.of(CallEventType.OUTCOME_RECORDED,
                     "Number is not reachable at all; lead closed"));
             return;
         }
         if (!outcome.isRetryable()) {
-            close(lead, LeadPipelineStatus.COMPLETED, null);
+            // M-2: the only outcome hitting this branch today is 'cancelled' — the agent
+            // deciding it is done here (usually because the lead hung up first without
+            // agreeing to anything). File it with a meaningful final status and move it
+            // out of the funnel so a stage-based view stops showing it as a fresh lead.
+            advanceStage(lead, LeadStage.DISCARDED);
+            close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.NO_DECISION);
+            callLog.addEvent(CallEvent.of(CallEventType.OUTCOME_RECORDED,
+                    "Call ended without a decision; lead closed"));
             return;
         }
         scheduleRetry(lead, callLog, outcome, settings, policy, now);
     }
 
+    /**
+     * Book the next retry, or file the lead as exhausted. M-1: split the exhausted final
+     * status by whether the lead ever picked up — a lead we spoke to but never got a
+     * decision from is NO_DECISION, not UNREACHABLE.
+     */
     private void scheduleRetry(Lead lead, LeadCallLog callLog, CallOutcome outcome,
                                AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         int maxAttempts = policy.maxAttemptsOrDefault();
         if (lead.attemptCountOrZero() >= maxAttempts) {
             lead.setNextAttemptAt(null);
             advanceStage(lead, LeadStage.DISCARDED);
-            close(lead, LeadPipelineStatus.EXHAUSTED, LeadFinalStatus.UNREACHABLE);
+            LeadFinalStatus terminal = orZero(lead.getConnectedCount()) > 0
+                    ? LeadFinalStatus.NO_DECISION
+                    : LeadFinalStatus.UNREACHABLE;
+            close(lead, LeadPipelineStatus.EXHAUSTED, terminal);
             callLog.addEvent(CallEvent.of(CallEventType.RETRIES_EXHAUSTED,
-                            "No answer after " + lead.attemptCountOrZero() + " attempts")
-                    .with("max_attempts", maxAttempts));
+                            "Exhausted after " + lead.attemptCountOrZero() + " attempts")
+                    .with("max_attempts", maxAttempts)
+                    .with("connected_count", orZero(lead.getConnectedCount()))
+                    .with("closed_as", terminal.getValue()));
             return;
         }
 
@@ -635,6 +824,27 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                         "Retry " + (lead.attemptCountOrZero() + 1) + " of " + maxAttempts)
                 .with("next_attempt_at", nextAttempt.toString())
                 .with("backoff_minutes", policy.backoffMinutesFor(outcome)));
+    }
+
+    /**
+     * Park a follow-up call without spending an attempt from the retry budget.
+     *
+     * <p>Used for dispositions that represent engagement rather than a failed connect —
+     * detailsRequested is the current case. The retry-budget exhaustion path exists to
+     * stop us dialling people who never answer; an interested caller must not be filed
+     * as UNREACHABLE just because they've spoken to us four times.
+     */
+    private void parkFollowUp(Lead lead, LeadCallLog callLog, AppSettings settings,
+                              CallPolicy policy, OffsetDateTime now, String reason) {
+        OffsetDateTime parkedFor = clampToWindow(
+                now.plusMinutes(policy.backoffMinutesFor(CallOutcome.ANSWERED)), settings, policy);
+        lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
+        lead.setFinalStatus(null);
+        lead.setNextAttemptAt(parkedFor);
+        callLog.setRetryScheduledFor(parkedFor);
+        callLog.addEvent(CallEvent.of(CallEventType.RETRY_SCHEDULED, reason)
+                .with("next_attempt_at", parkedFor.toString())
+                .with("exempt_from_budget", true));
     }
 
     /**
@@ -710,18 +920,43 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public int releaseStuckAttempts() {
-        OffsetDateTime cutoff = OffsetDateTime.now(ZoneOffset.UTC)
-                .minusMinutes(dialerProperties.getStaleDialMinutes());
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime cutoff = now.minusMinutes(dialerProperties.getStaleDialMinutes());
+        Date cutoffDate = Date.from(cutoff.toInstant());
+        Date nowDate = Date.from(now.toInstant());
 
-        Query query = Query.query(Criteria.where("pipeline_status").is(LeadPipelineStatus.DIALING.getValue())
-                .and("updated_at").lt(Date.from(cutoff.toInstant())));
+        // M-7: before flipping the lead back to QUEUED, close the abandoned leads_log row
+        // that was opened for the (dead) worker. Leaving it open feeds BLK-3 (a stale
+        // POST would still be accepted against it) and inflates unansweredAttempts on the
+        // dashboard forever. We match on lead_id + open row, so a re-claim opens a fresh
+        // attempt row and the audit trail cleanly shows the abandoned attempt.
+        Query stuckLeads = Query.query(Criteria.where("pipeline_status").is(LeadPipelineStatus.DIALING.getValue())
+                .and("updated_at").lt(cutoffDate));
+        List<Lead> stuck = mongoTemplate.find(stuckLeads, Lead.class);
 
-        Update update = new Update()
+        for (Lead lead : stuck) {
+            Query openLogs = Query.query(Criteria.where("lead_id").is(lead.getId())
+                    .and("outcome").is(null)
+                    .and("ended_at").is(null));
+            Update closeLog = new Update()
+                    .set("outcome", CallOutcome.FAILED.getValue())
+                    .set("ended_at", nowDate)
+                    .set("updated_at", nowDate)
+                    .set("error_code", "abandoned")
+                    .set("error_message", "Dialler abandoned; sweep closed the attempt")
+                    .set("pipeline_status_after", LeadPipelineStatus.QUEUED.getValue());
+            long closed = mongoTemplate.updateMulti(openLogs, closeLog, LeadCallLog.class).getModifiedCount();
+            if (closed > 0) {
+                log.info("Closed {} abandoned attempt row(s) for lead {}", closed, lead.getIdAsString());
+            }
+        }
+
+        Update leadUpdate = new Update()
                 .set("pipeline_status", LeadPipelineStatus.QUEUED.getValue())
-                .set("next_attempt_at", Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant()))
-                .set("updated_at", Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant()));
+                .set("next_attempt_at", nowDate)
+                .set("updated_at", nowDate);
 
-        long released = mongoTemplate.updateMulti(query, update, Lead.class).getModifiedCount();
+        long released = mongoTemplate.updateMulti(stuckLeads, leadUpdate, Lead.class).getModifiedCount();
         if (released > 0) {
             log.warn("Released {} lead(s) stuck in dialing", released);
         }
@@ -733,12 +968,25 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         Date now = Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant());
         // Identical filter to the claim, or the count advertises work that will never
         // be handed out.
-        Query query = Query.query(Criteria.where("do_not_call").ne(Boolean.TRUE)
+        Query scheduled = Query.query(Criteria.where("do_not_call").ne(Boolean.TRUE)
                 .and("stage").in(AGENT_CALLABLE_STAGES)
                 .and("pipeline_status").in(CLAIMABLE)
                 .and("project").nin(NO_PROJECT)
                 .and("next_attempt_at").lte(now));
-        return mongoTemplate.count(query, Lead.class);
+        long scheduledCount = mongoTemplate.count(scheduled, Lead.class);
+
+        // M-6: claimNext also drains call-now attempts via claimUndialledAttempts.
+        // If dueCount mirrors only claimOne, the poller idles on 0 while a manual click
+        // is waiting — the poller's docstring says "How many leads are due right now.
+        // The poller idles when this is 0." So both sources must be counted.
+        Date floor = Date.from(OffsetDateTime.now(ZoneOffset.UTC)
+                .minusMinutes(dialerProperties.getStaleDialMinutes()).toInstant());
+        Query undialled = Query.query(Criteria.where("dial_started_at").is(null)
+                .and("ended_at").is(null)
+                .and("direction").is("outbound")
+                .and("created_at").gt(floor));
+        long undialledCount = mongoTemplate.count(undialled, LeadCallLog.class);
+        return scheduledCount + undialledCount;
     }
 
     // ----------------------------------------------------------------- helpers
