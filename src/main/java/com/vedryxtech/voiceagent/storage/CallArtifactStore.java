@@ -72,6 +72,19 @@ public class CallArtifactStore {
     }
 
     /**
+     * Store arbitrary bytes. Used for the brochures and photos the "send details on
+     * WhatsApp" flow hands out, which are uploaded rather than generated.
+     */
+    public void putObject(String key, byte[] content, String contentType) {
+        client.putObject(PutObjectRequest.builder()
+                        .bucket(properties.getBucket())
+                        .key(key)
+                        .contentType(contentType)
+                        .build(),
+                RequestBody.fromBytes(content));
+    }
+
+    /**
      * A link that plays this object, valid for the configured window.
      *
      * <p>The result is a bearer token in URL form: anyone holding it can fetch the object
