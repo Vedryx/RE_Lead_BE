@@ -31,6 +31,9 @@ public class RefreshToken {
     @Field("user_id")
     private String userId;
 
+    /** TTL index: Mongo reaps a token once it passes expiresAt, so the collection self-cleans
+     *  and cannot grow unbounded from rotated or logged-out sessions. */
+    @Indexed(name = "ttl_refresh_expires", expireAfterSeconds = 0)
     @Field("expires_at")
     private OffsetDateTime expiresAt;
 
