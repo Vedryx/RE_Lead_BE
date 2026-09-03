@@ -42,7 +42,7 @@ public class LiveKitWebhookController {
                     + "LiveKit retries whatever is not 2xx, and a retry storm over "
                     + "track_published helps nobody.")
     @SecurityRequirements
-    @PostMapping(consumes = {"application/webhook+json", "application/json"})
+    @PostMapping(path = "/livekit", consumes = {"application/webhook+json", "application/json"})
     public ResponseEntity<String> receive(@RequestHeader(value = "Authorization", required = false)
                                           String authorization,
                                           @RequestBody String rawBody) {
