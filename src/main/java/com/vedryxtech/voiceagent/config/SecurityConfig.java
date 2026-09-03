@@ -75,6 +75,9 @@ public class SecurityConfig {
                         .requestMatchers("/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                        // LiveKit holds no credential of ours; the signature on the
+                        // body is the authentication, checked in the controller.
+                        .requestMatchers("/api/v1/webhooks/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2

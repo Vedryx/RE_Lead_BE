@@ -323,6 +323,13 @@ check "api key metadata" 200 "$STATUS"
 call GET /v3/api-docs none
 check "openapi spec" 200 "$STATUS"
 
+# The webhook is unauthenticated by necessity, so the one thing worth asserting from
+# outside is that it refuses anything it cannot verify.
+call POST /api/v1/webhooks/livekit none '{"event":"egress_ended"}'
+check "an unsigned webhook is refused" 401 "$STATUS"
+call POST /api/v1/webhooks/livekit none ""
+check "and so is an empty one" 401 "$STATUS"
+
 # ---------------------------------------------------------------- tidy up
 
 section "Cleanup"

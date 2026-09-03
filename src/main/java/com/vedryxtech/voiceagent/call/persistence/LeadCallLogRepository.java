@@ -18,6 +18,9 @@ public interface LeadCallLogRepository extends MongoRepository<LeadCallLog, Obje
 
     Optional<LeadCallLog> findByIdempotencyKey(String idempotencyKey);
 
+    /** The attempt an egress webhook is talking about, found by where it wrote the file. */
+    Optional<LeadCallLog> findByRecordingKey(String recordingKey);
+
     /** Attempts already made for a lead since a point in time - enforces the per-day cap. */
     long countByLeadIdAndDialStartedAtGreaterThanEqual(ObjectId leadId, OffsetDateTime since);
 }
