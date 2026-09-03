@@ -2,7 +2,7 @@ package com.vedryxtech.voiceagent;
 
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
-import com.vedryxtech.voiceagent.organization.domain.CallPolicy;
+import com.vedryxtech.voiceagent.settings.domain.CallPolicy;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import org.junit.jupiter.api.Test;
 

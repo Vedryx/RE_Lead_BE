@@ -10,6 +10,10 @@
 #
 #  Every value below is a real, working local value. Change them before this
 #  runs anywhere other than a laptop.
+#
+#  Single-tenant since 2026-09: there is no organization concept any more.
+#  The bootstrap creates the admin user and seeds the API key onto the
+#  app_settings singleton.
 # ---------------------------------------------------------------------------
 
 spring:
@@ -45,19 +49,20 @@ app:
     # Local HS256 secret. Must remain at least 32 characters long.
     jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g
     issuer: vedryxtech-voice-agent
-    access-token-ttl: 12h
+    # Short-lived access tokens; refresh handles longer sessions via /api/v1/auth/refresh.
+    access-token-ttl: 15m
 
     bootstrap:
-      # Creates the organization, its admin and the API key on first start.
+      # Creates the admin user, the app_settings singleton and the API key on first start.
       # Re-running is safe: nothing already in the database is overwritten.
       enabled: true
 
-      organization-name: Vedryx Tech
-      organization-slug: vedryx-tech
+      # Timezone for the calling window and dashboard day buckets, applied only when the
+      # app_settings singleton is being created for the first time.
       timezone: Asia/Kolkata
 
       admin-email: admin@vedryxtech.com
-      admin-password: CSPamk2OJCwP160CAa1!
+      admin-password: highRise-vedryxTech1!
       admin-name: Vedryx Admin
 
       # The key the AI voice agent sends as the X-API-Key header.

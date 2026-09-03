@@ -2,7 +2,8 @@ package com.vedryxtech.voiceagent.apikey.api;
 
 import com.vedryxtech.voiceagent.apikey.api.dto.ApiKeyResponse;
 import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
+import com.vedryxtech.voiceagent.settings.application.SettingsService;
+import com.vedryxtech.voiceagent.settings.domain.AppSettings;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
@@ -15,47 +16,45 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "3. API Keys",
-        description = "Manage the AI agent API key separately from login and user administration.")
+        description = "The AI agent API key, kept out of the login / user management surface.")
 @RestController
 @RequestMapping(path = "/api/v1/api-keys", produces = "application/json")
 public class ApiKeyController {
 
     private final ApiKeyService apiKeyService;
-    private final OrganizationService organizationService;
+    private final SettingsService settingsService;
 
-    public ApiKeyController(ApiKeyService apiKeyService, OrganizationService organizationService) {
+    public ApiKeyController(ApiKeyService apiKeyService, SettingsService settingsService) {
         this.apiKeyService = apiKeyService;
-        this.organizationService = organizationService;
+        this.settingsService = settingsService;
     }
 
-    @Operation(summary = "Create the current organization API key",
-            description = "Generates a key for the voice-agent application to authenticate with. "
-                    + "The full key is returned once and never again. "
-                    + "Calling this a second time replaces the old key immediately.")
+    @Operation(summary = "Create or rotate the API key",
+            description = "The full key is returned once and never again. Admins only.")
     @PostMapping("/current")
-    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiKeyResponse> create() {
         ApiKeyService.GeneratedKey generated = apiKeyService.generate();
+        AppSettings settings = settingsService.current();
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiKeyResponse.created(
                 generated.apiKey(),
                 generated.prefix(),
-                organizationService.current().getApiKeyCreatedAt()));
+                settings.getApiKeyCreatedAt()));
     }
 
-    @Operation(summary = "Show the current organization API key prefix",
-            description = "Returns only the prefix and when it was created. The key itself is stored "
-                    + "hashed and cannot be read back; if it is lost, create a new one.")
+    @Operation(summary = "Show the current API key prefix",
+            description = "Only the prefix and creation time — the key itself is stored hashed.")
     @GetMapping("/current")
-    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'MANAGER', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public ApiKeyResponse current() {
-        var organization = organizationService.current();
-        return ApiKeyResponse.existing(organization.getApiKeyPrefix(), organization.getApiKeyCreatedAt());
+        AppSettings settings = settingsService.current();
+        return ApiKeyResponse.existing(settings.getApiKeyPrefix(), settings.getApiKeyCreatedAt());
     }
 
-    @Operation(summary = "Revoke the current organization API key",
-            description = "The AI agent stops being able to reach this application immediately.")
+    @Operation(summary = "Revoke the API key",
+            description = "The agent stops being able to reach this application immediately.")
     @DeleteMapping("/current")
-    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> revoke() {
         apiKeyService.revoke();
         return ResponseEntity.noContent().build();

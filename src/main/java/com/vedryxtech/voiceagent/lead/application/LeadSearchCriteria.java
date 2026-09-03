@@ -11,7 +11,7 @@ import java.time.OffsetDateTime;
 
 /**
  * Optional filters for {@code GET /api/v1/leads}. A null field means "do not filter".
- * The organization is never a filter here - it comes from the access token.
+ * Single-tenant: there is no tenant scope to apply.
  */
 public record LeadSearchCriteria(
         String project,

@@ -1,0 +1,53 @@
+# Test overrides. The main application.yml points at Atlas and enables R2 storage;
+# neither is available in a Maven test run and neither is what we want to exercise
+# here. Tests use the LOCAL standalone Mongo the developer is already running for
+# dev — same topology as prod-local (no replica set → optimistic-lock race is real).
+# CI must have mongod on 127.0.0.1:27017 (a Testcontainers dep would need Docker at
+# CI time, and Flapdoodle's downloader fails silently on some ARM macOS builds).
+
+spring:
+  data:
+    mongodb:
+      uri: mongodb://127.0.0.1:27017/highRise_test
+      auto-index-creation: true
+
+app:
+  security:
+    jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g
+    issuer: vedryxtech-voice-agent
+    access-token-ttl: 15m
+    bootstrap:
+      # Seed the settings singleton, admin user and API key on context start, so
+      # tests do not have to manually create them. Wiped between tests via a
+      # dropDatabase() in @BeforeEach.
+      enabled: true
+      timezone: Asia/Kolkata
+      admin-email: admin@vedryxtech.com
+      admin-password: highRise-vedryxTech1!
+      admin-name: Vedryx Admin
+      api-key: vdx_test_do_not_use_in_prod
+      seed-leads: false
+
+  # Off in tests: the outcome service must survive storage being disabled, and the
+  # R2 credentials live in the main application.yml only.
+  storage:
+    enabled: false
+    endpoint: https://example.invalid
+    region: auto
+    bucket: test-bucket
+    access-key: test
+    secret-key: test
+    prefix: recordings
+    link-ttl: 15m
+
+  dialer:
+    scheduler-enabled: false
+    maintenance-interval-ms: 60000
+    maintenance-initial-delay-ms: 30000
+    batch-size: 25
+    stale-dial-minutes: 15
+
+logging:
+  level:
+    com.vedryxtech.voiceagent: INFO
+    de.flapdoodle: WARN

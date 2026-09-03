@@ -2,19 +2,17 @@ package com.vedryxtech.voiceagent.bootstrap;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.CollectionType;
+import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
 import com.vedryxtech.voiceagent.config.SecurityProperties;
-import com.vedryxtech.voiceagent.organization.domain.Organization;
+import com.vedryxtech.voiceagent.exception.DuplicateResourceException;
+import com.vedryxtech.voiceagent.lead.api.dto.LeadRequest;
+import com.vedryxtech.voiceagent.lead.application.LeadService;
+import com.vedryxtech.voiceagent.settings.application.SettingsService;
+import com.vedryxtech.voiceagent.settings.domain.AppSettings;
+import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
+import com.vedryxtech.voiceagent.user.application.UserService;
 import com.vedryxtech.voiceagent.user.domain.User;
 import com.vedryxtech.voiceagent.user.domain.UserRole;
-import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
-import com.vedryxtech.voiceagent.lead.api.dto.LeadRequest;
-import com.vedryxtech.voiceagent.organization.api.dto.RegisterOrganizationRequest;
-import com.vedryxtech.voiceagent.exception.DuplicateResourceException;
-import com.vedryxtech.voiceagent.organization.persistence.OrganizationRepository;
-import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
-import com.vedryxtech.voiceagent.lead.application.LeadService;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
-import com.vedryxtech.voiceagent.user.application.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -30,13 +28,14 @@ import java.util.Set;
  * First-boot setup, in one place so the ordering is explicit:
  *
  * <ol>
- *   <li>create the organization and its first admin when the database is empty;</li>
- *   <li>install the API key from configuration, so the AI agent can connect straight away;</li>
+ *   <li>ensure the {@code app_settings} singleton exists, with defaults, and picks up the
+ *       configured timezone if the doc is being created;</li>
+ *   <li>create the single admin user if the database has none;</li>
+ *   <li>install the API key from configuration when no key is stored yet;</li>
  *   <li>optionally load {@code seed/leads.json}.</li>
  * </ol>
  *
- * <p>Everything here is idempotent: restarting the application does not duplicate or overwrite
- * anything that already exists.</p>
+ * <p>Idempotent: restarting never duplicates or overwrites anything that already exists.</p>
  */
 @Component
 public class DataInitializer implements ApplicationRunner {
@@ -45,23 +44,20 @@ public class DataInitializer implements ApplicationRunner {
     private static final String SEED_FILE = "seed/leads.json";
 
     private final SecurityProperties securityProperties;
-    private final OrganizationRepository organizationRepository;
-    private final OrganizationService organizationService;
+    private final SettingsService settingsService;
     private final UserService userService;
     private final ApiKeyService apiKeyService;
     private final LeadService leadService;
     private final ObjectMapper objectMapper;
 
     public DataInitializer(SecurityProperties securityProperties,
-                           OrganizationRepository organizationRepository,
-                           OrganizationService organizationService,
+                           SettingsService settingsService,
                            UserService userService,
                            ApiKeyService apiKeyService,
                            LeadService leadService,
                            ObjectMapper objectMapper) {
         this.securityProperties = securityProperties;
-        this.organizationRepository = organizationRepository;
-        this.organizationService = organizationService;
+        this.settingsService = settingsService;
         this.userService = userService;
         this.apiKeyService = apiKeyService;
         this.leadService = leadService;
@@ -75,52 +71,69 @@ public class DataInitializer implements ApplicationRunner {
             return;
         }
 
-        Organization organization = organizationRepository.findBySlug(bootstrap.getOrganizationSlug())
-                .orElseGet(() -> createOrganization(bootstrap));
-
-        installApiKey(organization, bootstrap.getApiKey());
+        AppSettings settings = ensureSettings(bootstrap);
+        ensureAdmin(bootstrap);
+        installApiKey(settings, bootstrap.getApiKey());
 
         if (bootstrap.isSeedLeads()) {
             seedLeads();
         }
     }
 
-    private Organization createOrganization(SecurityProperties.Bootstrap bootstrap) {
-        RegisterOrganizationRequest request = new RegisterOrganizationRequest(
-                bootstrap.getOrganizationName(),
-                bootstrap.getOrganizationSlug(),
-                bootstrap.getTimezone(),
-                bootstrap.getAdminEmail(),
-                bootstrap.getAdminPassword(),
-                bootstrap.getAdminName(),
-                null);
-
-        Organization organization = organizationService.create(request);
-
-        if (userService.findByEmail(bootstrap.getAdminEmail()).isEmpty()) {
-            User admin = userService.create(organization.getIdAsString(), new CreateUserRequest(
-                    bootstrap.getAdminEmail(),
-                    bootstrap.getAdminPassword(),
-                    bootstrap.getAdminName(),
-                    null,
-                    Set.of(UserRole.ORG_ADMIN)));
-            log.info("Created organization '{}' with admin {}", organization.getName(), admin.getEmail());
+    /**
+     * Reads the singleton so {@link SettingsService#current()} creates it lazily on first
+     * boot, then updates the timezone iff we just created a doc that has none in config.
+     */
+    private AppSettings ensureSettings(SecurityProperties.Bootstrap bootstrap) {
+        AppSettings settings = settingsService.current();
+        String configuredTz = bootstrap.getTimezone();
+        if (configuredTz != null && !configuredTz.isBlank()
+                && (settings.getTimezone() == null || settings.getTimezone().isBlank())) {
+            settings.setTimezone(configuredTz.trim());
+            settings = settingsService.save(settings);
+            log.info("Set installation timezone to {}", settings.getTimezone());
         }
-        return organization;
+        return settings;
+    }
+
+    private void ensureAdmin(SecurityProperties.Bootstrap bootstrap) {
+        String email = bootstrap.getAdminEmail();
+        if (email == null || email.isBlank()) {
+            log.warn("Bootstrap enabled but no admin-email configured; skipping admin creation");
+            return;
+        }
+        if (userService.findByEmail(email).isPresent()) {
+            return;
+        }
+        if (bootstrap.getAdminPassword() == null || bootstrap.getAdminPassword().isBlank()) {
+            log.warn("Bootstrap admin-email is set but admin-password is missing; cannot create admin");
+            return;
+        }
+        try {
+            User admin = userService.create(new CreateUserRequest(
+                    email,
+                    bootstrap.getAdminPassword(),
+                    bootstrap.getAdminName() == null ? "Administrator" : bootstrap.getAdminName(),
+                    null,
+                    Set.of(UserRole.ADMIN)));
+            log.info("Created bootstrap admin {}", admin.getEmail());
+        } catch (DuplicateResourceException ex) {
+            log.debug("Admin {} already exists; nothing to do", email);
+        }
     }
 
     /**
-     * Installs the configured key only when the organization has none, so a key rotated
-     * through the API is never silently reset back to the one in the config file.
+     * Installs the configured key only when no key is stored, so a key rotated through the
+     * API is never silently reset back to the one in the config file.
      */
-    private void installApiKey(Organization organization, String configuredKey) {
+    private void installApiKey(AppSettings settings, String configuredKey) {
         if (configuredKey == null || configuredKey.isBlank()) {
             return;
         }
-        if (organization.getApiKeyHash() != null) {
+        if (settings.getApiKeyHash() != null) {
             return;
         }
-        apiKeyService.seed(organization, configuredKey.trim());
+        apiKeyService.seed(configuredKey.trim());
     }
 
     /**

@@ -3,8 +3,8 @@ package com.vedryxtech.voiceagent.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Bound from {@code app.dialer.*}. These are the fallbacks used when an organization has no
- * {@code call_policy} of its own; the per-tenant policy always wins.
+ * Bound from {@code app.dialer.*}. Runtime knobs the dialler sweep uses. The retry rules the
+ * agent reads live on the {@code app_settings} singleton, not here.
  */
 @ConfigurationProperties(prefix = "app.dialer")
 public class CallPolicyProperties {

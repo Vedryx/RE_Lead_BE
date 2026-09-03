@@ -67,7 +67,7 @@ public class LeadStageBackfill implements ApplicationRunner {
             return switch (finalStatus) {
                 case SITE_VISIT_BOOKED, SITE_VISIT_DONE -> LeadStage.SITE_VISIT;
                 case INTERESTED -> LeadStage.FOLLOW_UP;
-                case NOT_INTERESTED, UNQUALIFIED, UNREACHABLE,
+                case NOT_INTERESTED, UNQUALIFIED, UNREACHABLE, NO_DECISION,
                      DO_NOT_CALL, WRONG_NUMBER, DUPLICATE -> LeadStage.DISCARDED;
             };
         }

@@ -47,8 +47,10 @@ class CallControllerTest {
     private com.vedryxtech.voiceagent.call.mapper.CallLogMapper callLogMapper;
 
     @Test
-    void recordingResponseCarriesBothArtifacts() throws Exception {
-        // The URL is no longer a stored string; it is minted per request and expires.
+    void recordingResponseServesTheAgentPostedUrlWhenPresent() throws Exception {
+        // M-8: when the agent posts a recording_url on the outcome, that is the URL the
+        // README documents as "listed as playable" — round-trip it. We still hand out a
+        // presigned transcript link separately (that is our own R2 write).
         given(callLogService.require(anyString())).willReturn(playableCallLog());
         given(artifacts.linksFor(any())).willReturn(Map.of(
                 "audioUrl", "https://r2.example/audio.ogg?X-Amz-Signature=abc",
@@ -59,11 +61,29 @@ class CallControllerTest {
                 .andExpect(jsonPath("$.callLogId").value("6512a1b2c3d4e5f601020304"))
                 .andExpect(jsonPath("$.recordingStatus").value("available"))
                 .andExpect(jsonPath("$.prefix").value("recordings/mhs/2026/09/6512a1b2c3d4e5f601020304/"))
-                .andExpect(jsonPath("$.audioUrl").value("https://r2.example/audio.ogg?X-Amz-Signature=abc"))
+                // The URL the agent posted round-trips; it is the primary "playable" contract.
+                .andExpect(jsonPath("$.audioUrl").value("https://recordings.local/call-abc.mp3"))
                 .andExpect(jsonPath("$.transcriptUrl").value("https://r2.example/transcript.json?X-Amz-Signature=def"))
                 .andExpect(jsonPath("$.durationSeconds").value(214))
                 .andExpect(jsonPath("$.playable").value(true))
                 .andExpect(jsonPath("$.hasTranscript").value(true));
+    }
+
+    @Test
+    void recordingResponseFallsBackToR2WhenNoStoredUrl() throws Exception {
+        // If the agent did not post recording_url (LiveKit egress wrote straight into R2),
+        // fall back to a freshly presigned link to the audio_key the CRM chose.
+        LeadCallLog callLog = playableCallLog();
+        callLog.setRecordingUrl(null);
+        given(callLogService.require(anyString())).willReturn(callLog);
+        given(artifacts.linksFor(any())).willReturn(Map.of(
+                "audioUrl", "https://r2.example/audio.ogg?X-Amz-Signature=abc",
+                "transcriptUrl", "https://r2.example/transcript.json?X-Amz-Signature=def"));
+
+        mockMvc.perform(get("/api/v1/calls/6512a1b2c3d4e5f601020304/recording").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audioUrl").value("https://r2.example/audio.ogg?X-Amz-Signature=abc"))
+                .andExpect(jsonPath("$.playable").value(true));
     }
 
     @Test
@@ -87,7 +107,9 @@ class CallControllerTest {
     @Test
     void a_transcript_in_mongo_counts_even_with_no_bucket_configured() throws Exception {
         // Storage off is a supported deployment: the words are still readable.
+        // Clear the recording_url to prove hasTranscript stays true without any audio path.
         LeadCallLog callLog = playableCallLog();
+        callLog.setRecordingUrl(null);
         callLog.setTranscript(List.of(new TranscriptTurn("lead", "haan boliye", 4)));
         given(callLogService.require(anyString())).willReturn(callLog);
         given(artifacts.linksFor(any())).willReturn(Map.of());

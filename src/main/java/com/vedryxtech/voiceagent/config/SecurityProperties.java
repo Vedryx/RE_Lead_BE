@@ -13,9 +13,10 @@ public class SecurityProperties {
 
     private String issuer = "vedryxtech-voice-agent";
 
-    private Duration accessTokenTtl = Duration.ofHours(12);
+    /** Access token TTL: 15 minutes (was 12h before the rework). Refresh handles longer sessions. */
+    private Duration accessTokenTtl = Duration.ofMinutes(15);
 
-    /** The organization, admin and API key created on first start. */
+    /** The admin user and API key created on first start. */
     private Bootstrap bootstrap = new Bootstrap();
 
     public String getJwtSecret() {
@@ -51,17 +52,18 @@ public class SecurityProperties {
     }
 
     /**
-     * Everything needed for a working installation on first boot. Nothing here overwrites data
-     * that already exists, so these values only matter the first time the database is empty.
+     * Everything needed for a working installation on first boot. Nothing here overwrites
+     * data that already exists, so these values only matter the first time the database
+     * is empty.
+     *
+     * <p>Single-tenant: no organization to create; the bootstrap creates the app_settings
+     * singleton (with defaults) and the one admin user.</p>
      */
     public static class Bootstrap {
 
         private boolean enabled = true;
 
-        private String organizationName;
-
-        private String organizationSlug;
-
+        /** Timezone for the calling window and dashboard day buckets on first boot. */
         private String timezone = "Asia/Kolkata";
 
         private String adminEmail;
@@ -82,22 +84,6 @@ public class SecurityProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
-        }
-
-        public String getOrganizationName() {
-            return organizationName;
-        }
-
-        public void setOrganizationName(String organizationName) {
-            this.organizationName = organizationName;
-        }
-
-        public String getOrganizationSlug() {
-            return organizationSlug;
-        }
-
-        public void setOrganizationSlug(String organizationSlug) {
-            this.organizationSlug = organizationSlug;
         }
 
         public String getTimezone() {

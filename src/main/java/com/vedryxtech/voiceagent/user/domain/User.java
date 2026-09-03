@@ -2,7 +2,6 @@ package com.vedryxtech.voiceagent.user.domain;
 
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -12,18 +11,15 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * A login belonging to one organization. Email is globally unique so the login form needs
- * nothing but email + password; the organization is resolved from the account.
+ * A dashboard login. Single-tenant: every user belongs to this installation, so there is no
+ * {@code organization_id} scoping any more. Existing documents still carrying that field
+ * deserialise fine — the value is simply ignored.
  */
 @Document(collection = "app_user")
-@CompoundIndex(name = "idx_user_org_enabled", def = "{'organization_id': 1, 'enabled': 1}")
 public class User {
 
     @Id
     private ObjectId id;
-
-    @Field("organization_id")
-    private String organizationId;
 
     @Indexed(name = "uk_user_email", unique = true)
     @Field("email")
@@ -72,14 +68,6 @@ public class User {
 
     public void setId(ObjectId id) {
         this.id = id;
-    }
-
-    public String getOrganizationId() {
-        return organizationId;
-    }
-
-    public void setOrganizationId(String organizationId) {
-        this.organizationId = organizationId;
     }
 
     public String getEmail() {

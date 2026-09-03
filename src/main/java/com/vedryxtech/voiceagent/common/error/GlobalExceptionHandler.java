@@ -5,7 +5,9 @@ import com.vedryxtech.voiceagent.exception.ForbiddenException;
 import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
 import com.vedryxtech.voiceagent.exception.InvalidStateTransitionException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
+import com.vedryxtech.voiceagent.exception.TooManyRequestsException;
 import com.vedryxtech.voiceagent.exception.UnauthorizedException;
+import com.vedryxtech.voiceagent.exception.ValidationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,10 +18,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -54,6 +58,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request);
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiError> handleTooManyRequests(TooManyRequestsException ex, HttpServletRequest request) {
+        return build(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), request);
+    }
+
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex, HttpServletRequest request) {
         return build(HttpStatus.FORBIDDEN, ex.getMessage(), request);
@@ -68,6 +77,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidLeadPayloadException.class)
     public ResponseEntity<ApiError> handleInvalidPayload(InvalidLeadPayloadException ex, HttpServletRequest request) {
         return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), request);
+    }
+
+    /**
+     * Same 422 as above but with a per-field breakdown, so a settings PUT can surface every
+     * bad field in one round trip rather than one at a time.
+     */
+    @ExceptionHandler(ValidationException.class)
+    public ResponseEntity<ApiError> handleValidation(ValidationException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(apiErrorFactory.create(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ex.getMessage(),
+                request.getRequestURI(),
+                ex.getFieldErrors()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -107,6 +129,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAuthentication(AuthenticationException ex,
                                                          HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, "Authentication is required", request);
+    }
+
+    /** An unmapped path (including the removed organization routes) is a 404, not a 500. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> handleNoResource(NoResourceFoundException ex, HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND,
+                "No endpoint for " + request.getMethod() + " " + request.getRequestURI(), request);
+    }
+
+    /** DELETE / PUT on a route that only maps GET is 405, not 500 (M-14). */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex,
+                                                           HttpServletRequest request) {
+        return build(HttpStatus.METHOD_NOT_ALLOWED,
+                request.getMethod() + " is not supported on " + request.getRequestURI()
+                        + "; supported: " + String.join(", ", ex.getSupportedMethods() == null
+                            ? new String[]{} : ex.getSupportedMethods()),
+                request);
     }
 
     @ExceptionHandler(Exception.class)

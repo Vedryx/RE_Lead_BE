@@ -1,12 +1,14 @@
 package com.vedryxtech.voiceagent.auth.application;
 
-import com.vedryxtech.voiceagent.organization.domain.Organization;
 import com.vedryxtech.voiceagent.user.domain.User;
 
+/**
+ * Mints the short-lived (15 min) HS256 access token. Single-tenant: the token carries the
+ * subject, email, name and roles — no {@code org_slug} claim any more.
+ */
 public interface AccessTokenService {
 
-    /** Mints the signed access token that carries the user, the tenant and the roles. */
-    IssuedToken issue(User user, Organization organization);
+    IssuedToken issue(User user);
 
     record IssuedToken(String token, long expiresInSeconds) {
     }

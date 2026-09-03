@@ -1,54 +1,45 @@
-package com.vedryxtech.voiceagent.organization.domain;
+package com.vedryxtech.voiceagent.settings.domain;
 
-import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.OffsetDateTime;
 
 /**
- * The company running the dashboard. Users are created under it, and it owns the API key the
- * AI voice agent authenticates with.
+ * Singleton document that holds every installation-wide setting: the calling policy the
+ * dialler enforces, the timezone the calling window is expressed in, and the API-key hash
+ * the voice agent authenticates with.
+ *
+ * <p>One row, always, at the fixed id {@link #SINGLETON_ID}. Bootstrap creates it on first
+ * start if it is missing.</p>
  */
-@Document(collection = "organization")
-public class Organization {
+@Document(collection = "app_settings")
+public class AppSettings {
+
+    /** The one and only row. {@code current()} looks up by this id, so it is never wrong. */
+    public static final String SINGLETON_ID = "singleton";
 
     @Id
-    private ObjectId id;
-
-    @Field("name")
-    private String name;
-
-    /** URL-safe unique handle, e.g. {@code my-home-sanctuary}. */
-    @Indexed(name = "uk_org_slug", unique = true)
-    @Field("slug")
-    private String slug;
-
-    @Field("status")
-    private OrganizationStatus status;
-
-    @Field("contact_email")
-    private String contactEmail;
-
-    @Field("contact_phone")
-    private String contactPhone;
+    private String id = SINGLETON_ID;
 
     /** IANA zone used for calling windows and dashboard day buckets, e.g. {@code Asia/Kolkata}. */
     @Field("timezone")
-    private String timezone;
+    private String timezone = "Asia/Kolkata";
 
+    /** The runtime-writable retry rules the dialler applies. Never null after bootstrap. */
     @Field("call_policy")
-    private CallPolicy callPolicy;
+    private CallPolicy callPolicy = CallPolicy.defaults();
 
     // ------------------------------------------------------------------ API key
+    //
+    // Relocated off the old Organization document. Field names match what Organization used,
+    // so a mongosh migration is just a $rename per field.
 
     /**
      * SHA-256 of the API key. The key itself is shown once, at creation, and never stored,
      * so a database dump does not hand out working credentials.
      */
-    @Indexed(name = "uk_org_api_key_hash", unique = true, sparse = true)
     @Field("api_key_hash")
     private String apiKeyHash;
 
@@ -68,56 +59,12 @@ public class Organization {
     @Field("updated_at")
     private OffsetDateTime updatedAt;
 
-    public String getIdAsString() {
-        return id == null ? null : id.toHexString();
-    }
-
-    public ObjectId getId() {
+    public String getId() {
         return id;
     }
 
-    public void setId(ObjectId id) {
+    public void setId(String id) {
         this.id = id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getSlug() {
-        return slug;
-    }
-
-    public void setSlug(String slug) {
-        this.slug = slug;
-    }
-
-    public OrganizationStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(OrganizationStatus status) {
-        this.status = status;
-    }
-
-    public String getContactEmail() {
-        return contactEmail;
-    }
-
-    public void setContactEmail(String contactEmail) {
-        this.contactEmail = contactEmail;
-    }
-
-    public String getContactPhone() {
-        return contactPhone;
-    }
-
-    public void setContactPhone(String contactPhone) {
-        this.contactPhone = contactPhone;
     }
 
     public String getTimezone() {

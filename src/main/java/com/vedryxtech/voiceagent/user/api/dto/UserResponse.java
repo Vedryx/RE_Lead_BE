@@ -5,10 +5,13 @@ import com.vedryxtech.voiceagent.user.domain.UserRole;
 import java.time.OffsetDateTime;
 import java.util.Set;
 
-/** A user as returned by the API. The password hash is never part of this. */
+/**
+ * A user as returned by the API. The password hash is never part of this.
+ *
+ * <p>The pre-rework field {@code organizationId} was removed — single-tenant now.</p>
+ */
 public record UserResponse(
         String id,
-        String organizationId,
         String email,
         String fullName,
         String phone,

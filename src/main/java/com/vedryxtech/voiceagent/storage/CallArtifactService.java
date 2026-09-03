@@ -129,7 +129,11 @@ public class CallArtifactService {
         document.put("disposition", callLog.getDisposition());
         document.put("summary", callLog.getSummary());
         document.put("turnCount", callLog.getTranscriptTurnCount());
-        document.put("redacted", true);
+        // Deliberately no "redacted" flag. This service does not perform any redaction;
+        // stamping a boolean here was a data-governance lie — any downstream audit that
+        // trusted it would treat PII-bearing files as safe. A real redaction pipeline
+        // would need a redactor (phone / card / OTP regex + LLM pass or similar) and a
+        // schema version, then this field should re-appear reflecting the actual state.
         document.put("turns", turns.stream().map(turn -> Map.of(
                 "role", String.valueOf(turn.getRole()),
                 "text", String.valueOf(turn.getText()),

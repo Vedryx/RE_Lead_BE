@@ -2,6 +2,7 @@ package com.vedryxtech.voiceagent.config;
 
 import com.vedryxtech.voiceagent.common.domain.WireValue;
 import com.vedryxtech.voiceagent.common.domain.WireValues;
+import com.vedryxtech.voiceagent.user.domain.UserRole;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,6 +35,10 @@ public class MongoConfig {
                 OffsetDateTimeToDateConverter.INSTANCE,
                 DateToOffsetDateTimeConverter.INSTANCE,
                 WireValueToStringConverter.INSTANCE,
+                // Registered explicitly so legacy role names (orgAdmin, manager, ...) still
+                // deserialise on read into the collapsed ADMIN/MEMBER pair. Without this, the
+                // generic WireValue factory below throws on any docs written before the rework.
+                StringToUserRoleConverter.INSTANCE,
                 new StringToWireValueConverterFactory()));
     }
 
@@ -63,6 +68,17 @@ public class MongoConfig {
         @Override
         public OffsetDateTime convert(Date source) {
             return source.toInstant().atOffset(ZoneOffset.UTC);
+        }
+    }
+
+    /** Legacy-tolerant reader for UserRole. Uses the enum's own {@code fromValue}. */
+    @ReadingConverter
+    enum StringToUserRoleConverter implements Converter<String, UserRole> {
+        INSTANCE;
+
+        @Override
+        public UserRole convert(String source) {
+            return UserRole.fromValue(source);
         }
     }
 

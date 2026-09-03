@@ -7,6 +7,7 @@ import com.vedryxtech.voiceagent.call.mapper.CallLogMapper;
 import com.vedryxtech.voiceagent.call.application.CallOrchestrationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,10 +16,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * The three agent-only queue endpoints (queue depth, claim, recoveries). API_CLIENT-only —
+ * no human dashboard user needs to poll the queue.
+ */
 @Tag(name = "8. Call Queue",
-        description = "Dialler queue operations, separated from call log resources.")
+        description = "Dialler queue operations for the voice agent.")
 @RestController
 @RequestMapping(path = "/api/v1/call-queue", produces = "application/json")
+@PreAuthorize("hasRole('API_CLIENT')")
 public class CallQueueController {
 
     private final CallOrchestrationService orchestrationService;

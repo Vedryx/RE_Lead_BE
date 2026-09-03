@@ -75,8 +75,11 @@ class CallArtifactServiceTest {
                 .contains("\"callLogId\"")
                 .contains("\"project\"")
                 .contains("\"turnCount\" : 2")
-                .contains("\"redacted\" : true")
                 .contains("haan boliye");
+        // M-9: the pre-rework build stamped every archived transcript with `redacted: true`
+        // whether or not anything was redacted, misleading any downstream audit that trusted
+        // the flag. The field must not appear until real redaction infrastructure lands.
+        assertThat(body.getValue()).doesNotContain("\"redacted\"");
     }
 
     @Test
