@@ -178,15 +178,32 @@ check "queue depth" 200 "$STATUS"
 call GET /api/v1/call-queue jwt
 check "the queue is closed to a person's token" 403 "$STATUS"
 
+# The claim hands back whichever lead is due first, which on a shared database is
+# rarely the one this run created. Assert the shape, then release it — no call was
+# placed, so "failed" is the truthful outcome and it stops the lead sitting in
+# dialing until the fifteen-minute sweep.
 call POST "/api/v1/call-queue/claims?limit=1" key
 check "claim" 200 "$STATUS" "$BODY"
-CALL_LOG_ID=$(json '.[0].callLogId')
-expect "claim carries the audio key" \
-  "$(json '.[0].recordingKey' | grep -c 'audio.ogg')" "1"
-expect "claim carries the project" "$(json '.[0].context.project')" "$PROJECT"
+CLAIMED_LOG=$(json '.[0].callLogId')
+if [[ -n "$CLAIMED_LOG" && "$CLAIMED_LOG" != "null" ]]; then
+  expect "claim carries the audio key" \
+    "$(json '.[0].recordingKey' | grep -c 'audio.ogg')" "1"
+  expect "claim carries the project" "$(json '.[0].context.project' | grep -c .)" "1"
+  call POST "/api/v1/calls/$CLAIMED_LOG/outcome" key \
+    '{"outcome":"failed","errorCode":"smoke_test","errorMessage":"claimed by the smoke test, never dialled"}'
+  check "a claimed lead is released, not stranded" 200 "$STATUS"
+else
+  printf "  %snote%s queue was empty; claim shape not exercised\n" "$DIM" "$OFF"
+fi
+
+# This run's own attempt comes from "Call now", so the outcome below is reported
+# against a call log we know belongs to our lead.
+call POST "/api/v1/leads/$LEAD_ID/calls" jwt '{"idempotencyKey":"smoke-'"$RUN_ID"'"}'
+check "open an attempt on our own lead" 202 "$STATUS" "$BODY"
+CALL_LOG_ID=$(json .callLogId)
 
 call GET "/api/v1/leads/$LEAD_ID" jwt
-expect "claiming marks the lead dialing" "$(json .pipelineStatus)" "dialing"
+expect "opening an attempt marks the lead dialing" "$(json .pipelineStatus)" "dialing"
 
 # ---------------------------------------------------------------- outcome
 
@@ -258,11 +275,8 @@ call POST "/api/v1/leads/$LEAD_ID/call-reschedules" jwt \
   "{\"requestedAt\":\"$(date -u -v+1d '+%Y-%m-%dT11:00:00Z' 2>/dev/null || date -u -d '+1 day' '+%Y-%m-%dT11:00:00Z')\",\"notes\":\"smoke\"}"
 check "reschedule" 200 "$STATUS" "$BODY"
 
-call POST "/api/v1/leads/$LEAD_ID/calls" jwt '{"idempotencyKey":"smoke-once"}'
-check "Call now" 202 "$STATUS" "$BODY"
-MANUAL_CALL=$(json .callLogId)
-call POST "/api/v1/leads/$LEAD_ID/calls" jwt '{"idempotencyKey":"smoke-once"}'
-expect "a double click returns the same attempt" "$(json .callLogId)" "$MANUAL_CALL"
+call POST "/api/v1/leads/$LEAD_ID/calls" jwt '{"idempotencyKey":"smoke-'"$RUN_ID"'"}'
+expect "a double click returns the same attempt" "$(json .callLogId)" "$CALL_LOG_ID"
 
 # ---------------------------------------------------------------- consent
 
