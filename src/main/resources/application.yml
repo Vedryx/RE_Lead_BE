@@ -76,6 +76,21 @@ app:
       # file later cannot feed test rows to a live dialler.
       seed-leads: false
 
+  # Placing the calls the queue says are due. This lived in a separate Python
+  # process until LiveKit's scale-to-zero made that impossible: a sleeping agent
+  # cannot dispatch the call that would wake it, so the dialler had to live
+  # somewhere always on, and the service that owns the queue is the shortest answer.
+  dispatch:
+    enabled: ${DISPATCH_ENABLED:false}
+    # Three is comfortable. LiveKit's Build plan refuses a sixth concurrent agent
+    # session, so five is the hard ceiling above this one.
+    max-concurrent: ${DISPATCH_MAX_CONCURRENT:3}
+    poll-seconds: 15
+    livekit-url: ${LIVEKIT_URL:}
+    agent-name: ${LIVEKIT_AGENT_NAME:the-real-estate}
+    outbound-trunk-id: ${LIVEKIT_OUTBOUND_TRUNK_ID:}
+    caller-id: ${PLIVO_PHONE_NUMBER:}
+
   # Verifying that an egress webhook really came from LiveKit. Same key and secret
   # the agent dials with; without them every webhook is refused.
   livekit:
