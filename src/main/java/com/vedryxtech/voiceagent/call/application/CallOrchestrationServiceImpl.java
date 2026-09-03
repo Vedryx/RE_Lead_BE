@@ -215,9 +215,16 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         // No daily-cap check here, deliberately. claimNext defers a lead over
         // maxAttemptsPerDay; a person pressing the button has decided this one is worth
         // an extra call, and the cap exists to stop us pestering people automatically.
-        lead.setPipelineStatus(LeadPipelineStatus.DIALING);
-        lead.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-        lead = leadRepository.save(lead);
+        //
+        // BLK-3 ratchet: if the lead is already terminal (e.g., a booked visit being
+        // reminded), do NOT flip pipeline_status to DIALING — that would demote a good
+        // final_status the moment the call opens. The log row is still created so history
+        // shows the reminder attempt.
+        if (!lead.isClosed()) {
+            lead.setPipelineStatus(LeadPipelineStatus.DIALING);
+            lead.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            lead = leadRepository.save(lead);
+        }
 
         String handledBy = request != null && request.handledBy() != null
                 ? request.handledBy()
@@ -393,7 +400,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         artifacts.assignKeys(saved, lead.getProject());
         saved = callLogRepository.save(saved);
 
-        lead.setPipelineStatus(LeadPipelineStatus.DIALING);
+        // Same ratchet as startCall: only bump pipeline_status when the lead is still in
+        // play. A reminder call to a closed lead opens the log without demoting it.
+        if (!lead.isClosed()) {
+            lead.setPipelineStatus(LeadPipelineStatus.DIALING);
+        }
         lead.setAttemptCount(attemptNumber);
         lead.setLastAttemptAt(now);
         lead.setLastCallLogId(saved.getId());
