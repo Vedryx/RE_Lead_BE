@@ -80,6 +80,11 @@ app:
   # process until LiveKit's scale-to-zero made that impossible: a sleeping agent
   # cannot dispatch the call that would wake it, so the dialler had to live
   # somewhere always on, and the service that owns the queue is the shortest answer.
+  # Where this instance actually answers. Swagger's "Try it out" aims at whichever
+  # server the spec lists first, so a deployment that only advertises localhost
+  # sends every request from its own docs to the reader's laptop.
+  public-url: ${PUBLIC_URL:https://highrisebe.vedryxtech.com}
+
   dispatch:
     enabled: ${DISPATCH_ENABLED:true}
     # Three is comfortable. LiveKit's Build plan refuses a sixth concurrent agent

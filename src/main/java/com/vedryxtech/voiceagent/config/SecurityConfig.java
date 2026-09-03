@@ -73,6 +73,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/logout").permitAll()
                         // Swagger UI itself is public; the endpoints it calls still need credentials.
                         .requestMatchers("/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**",
+                                "/scalar", "/scalar/**", "/webjars/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         // LiveKit holds no credential of ours; the signature on the

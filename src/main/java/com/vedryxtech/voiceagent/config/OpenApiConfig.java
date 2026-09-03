@@ -71,17 +71,27 @@ public class OpenApiConfig {
         return new ModelResolver(objectMapper);
     }
 
+    private static Server local(String port) {
+        return new Server().url("http://localhost:" + port).description("Local");
+    }
+
     @Bean
-    public OpenAPI voiceAgentOpenApi(@Value("${server.port:8080}") String port) {
+    public OpenAPI voiceAgentOpenApi(@Value("${server.port:8080}") String port,
+                                     @Value("${app.public-url:}") String publicUrl) {
         return new OpenAPI()
                 .info(new Info()
                         .title("AI Voice Agent - Dashboard API")
                         .version("v1")
                         .description(DESCRIPTION)
                         .contact(new Contact().name("Vedryx Tech")))
-                .servers(List.of(new Server()
-                        .url("http://localhost:" + port)
-                        .description("Local")))
+                // Staging first, because that is where anyone opening these docs is
+                // already pointed. Swagger sends "Try it out" to whichever server is
+                // selected, and a list that starts with localhost quietly aims every
+                // request at a machine the reader is not running.
+                .servers(publicUrl.isBlank()
+                        ? List.of(local(port))
+                        : List.of(new Server().url(publicUrl).description("Staging"),
+                                  local(port)))
                 .components(new Components().addSecuritySchemes(BEARER_SCHEME, new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP)
                         .scheme("bearer")
