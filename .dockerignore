@@ -1,0 +1,11 @@
+target/
+.git/
+.github/
+.idea/
+*.iml
+.env
+postman/
+docs/
+scripts/
+api.http
+*.md
