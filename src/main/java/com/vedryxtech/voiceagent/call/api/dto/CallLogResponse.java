@@ -7,6 +7,7 @@ import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -33,10 +34,18 @@ public record CallLogResponse(
         RecordingStatus recordingStatus,
         String recordingUrl,
         Integer recordingDurationSeconds,
-        @Schema(description = "Never written. Declared on the document and mapped here, "
-                + "but setTranscriptUrl has no callers — the agent keeps no transcript "
-                + "and the summary is the record of what was said.")
-        String transcriptUrl,
+        @Schema(description = "Object key of the archived transcript. Not a URL you can "
+                + "open — call GET /calls/{id}/recording for a signed link.")
+        String transcriptKey,
+
+        @Schema(description = "What was said, oldest first. Redacted by the agent before "
+                + "it was stored: card numbers, account numbers and one-time codes "
+                + "never leave the call.")
+        List<TranscriptTurn> transcript,
+
+        @Schema(description = "Turns before truncation. Larger than transcript.size() "
+                + "means the stored copy is trimmed.")
+        Integer transcriptTurnCount,
         String summary,
         String notes,
         OffsetDateTime requestedCallbackAt,
