@@ -91,6 +91,9 @@ public class LiveKitClient {
      */
     public void dialOut(String roomName, String phone, String displayName, String metadataJson) {
         String identity = "lead-" + phone.replaceAll("[^a-zA-Z0-9_-]", "");
+        // The SIP service checks its own grant, not the video one. A token good enough
+        // to create the room is refused here — which showed up as a room with nobody
+        // in it and a lead marked dialing that never rang.
         post("/twirp/livekit.SIP/CreateSIPParticipant",
                 Map.of("sip_trunk_id", properties.getOutboundTrunkId(),
                         "sip_number", properties.getCallerId(),
@@ -100,7 +103,14 @@ public class LiveKitClient {
                         "participant_name", displayName,
                         "participant_metadata", metadataJson,
                         "wait_until_answered", false),
-                grant(Map.of("roomAdmin", true, "room", roomName, "roomCreate", true)));
+                sipCallToken(roomName));
+    }
+
+    /** A token carrying both grants: room admin to join it, sip.call to ring the phone. */
+    private String sipCallToken(String roomName) {
+        return token(Map.of(
+                "video", Map.of("roomAdmin", true, "room", roomName, "roomCreate", true),
+                "sip", Map.of("call", true)));
     }
 
     private JsonNode post(String path, Map<String, Object> body, String token) {
@@ -126,15 +136,26 @@ public class LiveKitClient {
      * so a leaked one buys very little.
      */
     private String grant(Map<String, Object> video) {
+        return token(Map.of("video", video));
+    }
+
+    /**
+     * A token good for one request and ten minutes.
+     *
+     * <p>Scoped to the claims the call actually needs rather than a blanket admin
+     * token, so a leaked one buys very little.
+     */
+    private String token(Map<String, Object> claims) {
         try {
-            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256),
-                    new JWTClaimsSet.Builder()
-                            .issuer(credentials.getApiKey())
-                            .subject(credentials.getApiKey())
-                            .issueTime(Date.from(Instant.now()))
-                            .expirationTime(Date.from(Instant.now().plusSeconds(600)))
-                            .claim("video", video)
-                            .build());
+            JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder()
+                    .issuer(credentials.getApiKey())
+                    .subject(credentials.getApiKey())
+                    .issueTime(Date.from(Instant.now()))
+                    .expirationTime(Date.from(Instant.now().plusSeconds(600)));
+            // Only the grants this request needs. A null claim would serialise as
+            // "sip": null, which is not the same as omitting it.
+            claims.forEach(builder::claim);
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), builder.build());
             jwt.sign(new MACSigner(credentials.getApiSecret().getBytes(StandardCharsets.UTF_8)));
             return jwt.serialize();
         } catch (Exception ex) {
