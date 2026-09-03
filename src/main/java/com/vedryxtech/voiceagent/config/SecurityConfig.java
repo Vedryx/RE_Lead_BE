@@ -1,9 +1,9 @@
 package com.vedryxtech.voiceagent.config;
 
-import com.vedryxtech.voiceagent.common.error.ApiErrorResponseWriter;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import com.vedryxtech.voiceagent.security.ApiKeyAuthenticationFilter;
 import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
+import com.vedryxtech.voiceagent.common.error.ApiErrorResponseWriter;
+import com.vedryxtech.voiceagent.security.ApiKeyAuthenticationFilter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,6 +38,10 @@ import java.nio.charset.StandardCharsets;
  *
  * <p>The API-key filter runs first and simply passes the request on when no key is present,
  * so the two never interfere with each other.</p>
+ *
+ * <p>Single-tenant: the pre-rework self-serve {@code POST /api/v1/organizations} signup is
+ * gone, so nothing under {@code /organizations} is public any more. Only the three auth
+ * endpoints (login, refresh, logout) and the Swagger UI plumbing are open.</p>
  */
 @Configuration
 @EnableConfigurationProperties(SecurityProperties.class)
@@ -63,7 +67,9 @@ public class SecurityConfig {
                 .addFilterBefore(apiKeyAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/login", "/api/v1/organizations").permitAll()
+                        .requestMatchers("/api/v1/auth/login",
+                                "/api/v1/auth/refresh",
+                                "/api/v1/auth/logout").permitAll()
                         // Swagger UI itself is public; the endpoints it calls still need credentials.
                         .requestMatchers("/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/swagger-resources/**").permitAll()

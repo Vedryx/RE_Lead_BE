@@ -1,10 +1,10 @@
 package com.vedryxtech.voiceagent.user.application;
 
-import com.vedryxtech.voiceagent.user.domain.User;
-import com.vedryxtech.voiceagent.user.domain.UserRole;
-import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
 import com.vedryxtech.voiceagent.exception.DuplicateResourceException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
+import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
+import com.vedryxtech.voiceagent.user.domain.User;
+import com.vedryxtech.voiceagent.user.domain.UserRole;
 import com.vedryxtech.voiceagent.user.persistence.UserRepository;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
@@ -34,7 +34,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public User create(String organizationId, CreateUserRequest request) {
+    public User create(CreateUserRequest request) {
         String email = normalizeEmail(request.email());
         if (repository.existsByEmailIgnoreCase(email)) {
             throw new DuplicateResourceException("A user with email '" + email + "' already exists");
@@ -42,7 +42,6 @@ public class UserServiceImpl implements UserService {
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         User user = new User();
-        user.setOrganizationId(organizationId);
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setFullName(request.fullName().trim());
@@ -53,7 +52,7 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedAt(now);
 
         User saved = repository.save(user);
-        log.info("Created user {} in organization {}", saved.getEmail(), organizationId);
+        log.info("Created user {}", saved.getEmail());
         return saved;
     }
 
@@ -63,12 +62,17 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public User require(String userId) {
+    public Optional<User> findById(String userId) {
         if (userId == null || !ObjectId.isValid(userId)) {
-            throw ResourceNotFoundException.of("user", "id", String.valueOf(userId));
+            return Optional.empty();
         }
-        return repository.findById(new ObjectId(userId))
-                .orElseThrow(() -> ResourceNotFoundException.of("user", "id", userId));
+        return repository.findById(new ObjectId(userId));
+    }
+
+    @Override
+    public User require(String userId) {
+        return findById(userId)
+                .orElseThrow(() -> ResourceNotFoundException.of("user", "id", String.valueOf(userId)));
     }
 
     @Override
@@ -92,7 +96,7 @@ public class UserServiceImpl implements UserService {
 
     private static Set<UserRole> rolesOrDefault(Set<UserRole> roles) {
         return roles == null || roles.isEmpty()
-                ? new LinkedHashSet<>(Set.of(UserRole.AGENT))
+                ? new LinkedHashSet<>(Set.of(UserRole.MEMBER))
                 : new LinkedHashSet<>(roles);
     }
 

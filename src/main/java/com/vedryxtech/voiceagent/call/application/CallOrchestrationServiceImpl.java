@@ -7,14 +7,14 @@ import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallEvent;
 import com.vedryxtech.voiceagent.call.domain.CallEventType;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
-import com.vedryxtech.voiceagent.organization.domain.CallPolicy;
+import com.vedryxtech.voiceagent.settings.domain.CallPolicy;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
-import com.vedryxtech.voiceagent.organization.domain.Organization;
+import com.vedryxtech.voiceagent.settings.domain.AppSettings;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 import com.vedryxtech.voiceagent.call.api.dto.CallOutcomeRequest;
 import com.vedryxtech.voiceagent.call.api.dto.RescheduleRequest;
@@ -27,7 +27,7 @@ import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
 import com.vedryxtech.voiceagent.storage.CallArtifactService;
 import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import com.vedryxtech.voiceagent.security.CurrentActor;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
+import com.vedryxtech.voiceagent.settings.application.SettingsService;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
@@ -88,7 +88,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     private final LeadRepository leadRepository;
     private final LeadCallLogRepository callLogRepository;
-    private final OrganizationService organizationService;
+    private final SettingsService settingsService;
     private final MongoTemplate mongoTemplate;
     private final CallPolicyProperties dialerProperties;
     private final CurrentActor currentActor;
@@ -96,14 +96,14 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     public CallOrchestrationServiceImpl(LeadRepository leadRepository,
                                         LeadCallLogRepository callLogRepository,
-                                        OrganizationService organizationService,
+                                        SettingsService settingsService,
                                         MongoTemplate mongoTemplate,
                                         CallPolicyProperties dialerProperties,
                                         CurrentActor currentActor,
                                         CallArtifactService artifacts) {
         this.leadRepository = leadRepository;
         this.callLogRepository = callLogRepository;
-        this.organizationService = organizationService;
+        this.settingsService = settingsService;
         this.mongoTemplate = mongoTemplate;
         this.dialerProperties = dialerProperties;
         this.currentActor = currentActor;
@@ -114,8 +114,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public List<CallSession> claimNext(int limit) {
-        Organization organization = organizationService.current();
-        CallPolicy policy = policyOf(organization);
+        AppSettings settings = settingsService.current();
+        CallPolicy policy = policyOf(settings);
 
         int batch = Math.min(Math.max(limit, 1), dialerProperties.getBatchSize());
         List<CallSession> sessions = new ArrayList<>(batch);
@@ -129,12 +129,12 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             if (claimed == null) {
                 break;
             }
-            if (attemptsToday(claimed, organization) >= policy.maxAttemptsPerDayOrDefault()) {
+            if (attemptsToday(claimed, settings) >= policy.maxAttemptsPerDayOrDefault()) {
                 // Over the daily cap: put it back with tomorrow's window instead of dialling.
-                deferToNextWindow(claimed, organization, policy);
+                deferToNextWindow(claimed, settings, policy);
                 continue;
             }
-            sessions.add(openAttempt(claimed, organization, policy, null, AI_AGENT, null, true));
+            sessions.add(openAttempt(claimed, settings, policy, null, AI_AGENT, null, true));
         }
 
         log.debug("Claimed {} lead(s)", sessions.size());
@@ -167,8 +167,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public CallSession startCall(String leadId, StartCallRequest request) {
-        Organization organization = organizationService.current();
-        CallPolicy policy = policyOf(organization);
+        AppSettings settings = settingsService.current();
+        CallPolicy policy = policyOf(settings);
 
         Lead lead = requireLead(leadId);
 
@@ -207,7 +207,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
         // dialStarting = false: this queues the call, it does not place it. The dialler
         // claims it on its next pass, which is why startCall answers 202 and not 200.
-        return openAttempt(lead, organization, policy, idempotencyKey, handledBy,
+        return openAttempt(lead, settings, policy, idempotencyKey, handledBy,
                 request == null ? null : request.recordingEnabled(), false);
     }
 
@@ -319,7 +319,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     }
 
     /** Creates the {@code leads_log} row for one attempt. */
-    private CallSession openAttempt(Lead lead, Organization organization, CallPolicy policy,
+    private CallSession openAttempt(Lead lead, AppSettings settings, CallPolicy policy,
                                     String idempotencyKey, String handledBy,
                                     Boolean recordingOverride, boolean dialStarting) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -385,8 +385,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public LeadCallLog recordOutcome(String callLogId, CallOutcomeRequest request) {
-        Organization organization = organizationService.current();
-        CallPolicy policy = policyOf(organization);
+        AppSettings settings = settingsService.current();
+        CallPolicy policy = policyOf(settings);
 
         LeadCallLog callLog = requireLog(callLogId);
         if (callLog.isClosed()) {
@@ -430,9 +430,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             callLog.setAnsweredAt(callLog.getAnsweredAt() != null ? callLog.getAnsweredAt() : now);
             lead.setConnectedCount(orZero(lead.getConnectedCount()) + 1);
             lead.setLastConnectedAt(now);
-            applyDisposition(lead, callLog, request, organization, policy, now);
+            applyDisposition(lead, callLog, request, settings, policy, now);
         } else {
-            applyUnanswered(lead, callLog, outcome, organization, policy, now);
+            applyUnanswered(lead, callLog, outcome, settings, policy, now);
         }
 
         callLog.setPipelineStatusAfter(lead.getPipelineStatus());
@@ -482,7 +482,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     /** The connected path: what the lead agreed to decides where the lead goes next. */
     private void applyDisposition(Lead lead, LeadCallLog callLog, CallOutcomeRequest request,
-                                  Organization organization, CallPolicy policy, OffsetDateTime now) {
+                                  AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         CallDisposition disposition = request.disposition();
         if (disposition == null) {
             throw new InvalidLeadPayloadException(
@@ -548,7 +548,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 lead.setConfirmedByLead(Boolean.TRUE);
                 lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
                 lead.setFinalStatus(null);
-                lead.setNextAttemptAt(clampToWindow(request.requestedCallbackAt(), organization, policy));
+                lead.setNextAttemptAt(clampToWindow(request.requestedCallbackAt(), settings, policy));
                 callLog.setRetryScheduledFor(lead.getNextAttemptAt());
                 callLog.addEvent(CallEvent.of(CallEventType.CALLBACK_REQUESTED, "Callback booked")
                         .with("requested_at", request.requestedCallbackAt().toString())
@@ -565,7 +565,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 // and closing here nulls nextAttemptAt so the lead would sit in FOLLOW_UP
                 // looking active and never be dialled again. Nothing sends the details
                 // yet either, so this lead is owed both a message and a call.
-                scheduleRetry(lead, callLog, CallOutcome.ANSWERED, organization, policy, now);
+                scheduleRetry(lead, callLog, CallOutcome.ANSWERED, settings, policy, now);
             }
             case INTERESTED -> {
                 // Interested but nothing agreed: still ours to chase, not a discard.
@@ -591,13 +591,13 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             }
             case LANGUAGE_BARRIER, NO_DECISION ->
                 // Connected but unresolved: try again later, and this one does spend an attempt.
-                    scheduleRetry(lead, callLog, CallOutcome.ANSWERED, organization, policy, now);
+                    scheduleRetry(lead, callLog, CallOutcome.ANSWERED, settings, policy, now);
         }
     }
 
     /** The unanswered path: retry with backoff, or give up once the budget is spent. */
     private void applyUnanswered(Lead lead, LeadCallLog callLog, CallOutcome outcome,
-                                 Organization organization, CallPolicy policy, OffsetDateTime now) {
+                                 AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         if (outcome.isPermanentFailure()) {
             close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.WRONG_NUMBER);
             callLog.addEvent(CallEvent.of(CallEventType.OUTCOME_RECORDED,
@@ -608,11 +608,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             close(lead, LeadPipelineStatus.COMPLETED, null);
             return;
         }
-        scheduleRetry(lead, callLog, outcome, organization, policy, now);
+        scheduleRetry(lead, callLog, outcome, settings, policy, now);
     }
 
     private void scheduleRetry(Lead lead, LeadCallLog callLog, CallOutcome outcome,
-                               Organization organization, CallPolicy policy, OffsetDateTime now) {
+                               AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         int maxAttempts = policy.maxAttemptsOrDefault();
         if (lead.attemptCountOrZero() >= maxAttempts) {
             lead.setNextAttemptAt(null);
@@ -625,7 +625,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         }
 
         OffsetDateTime nextAttempt = clampToWindow(
-                now.plusMinutes(policy.backoffMinutesFor(outcome)), organization, policy);
+                now.plusMinutes(policy.backoffMinutesFor(outcome)), settings, policy);
 
         lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
         lead.setFinalStatus(null);
@@ -655,8 +655,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public Lead reschedule(String leadId, RescheduleRequest request) {
-        Organization organization = organizationService.current();
-        CallPolicy policy = policyOf(organization);
+        AppSettings settings = settingsService.current();
+        CallPolicy policy = policyOf(settings);
 
         Lead lead = requireLead(leadId);
 
@@ -666,7 +666,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        OffsetDateTime scheduledAt = clampToWindow(request.requestedAt(), organization, policy);
+        OffsetDateTime scheduledAt = clampToWindow(request.requestedAt(), settings, policy);
 
         lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
         lead.setFinalStatus(null);
@@ -744,11 +744,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     // ----------------------------------------------------------------- helpers
 
     /**
-     * Pushes a time into the organization's calling window: before it, move to today's opening;
+     * Pushes a time into the installation's calling window: before it, move to today's opening;
      * after it, move to tomorrow's opening. Keeps the dialler inside legal calling hours.
      */
-    private OffsetDateTime clampToWindow(OffsetDateTime candidate, Organization organization, CallPolicy policy) {
-        ZoneId zone = zoneOf(organization);
+    private OffsetDateTime clampToWindow(OffsetDateTime candidate, AppSettings settings, CallPolicy policy) {
+        ZoneId zone = zoneOf(settings);
         ZonedDateTime local = candidate.atZoneSameInstant(zone);
         LocalTime start = policy.windowStart();
         LocalTime end = policy.windowEnd();
@@ -762,8 +762,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         return candidate;
     }
 
-    private void deferToNextWindow(Lead lead, Organization organization, CallPolicy policy) {
-        ZoneId zone = zoneOf(organization);
+    private void deferToNextWindow(Lead lead, AppSettings settings, CallPolicy policy) {
+        ZoneId zone = zoneOf(settings);
         ZonedDateTime tomorrow = OffsetDateTime.now(ZoneOffset.UTC)
                 .atZoneSameInstant(zone)
                 .plusDays(1)
@@ -776,8 +776,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         log.debug("Lead {} hit the daily attempt cap; deferred to {}", lead.getIdAsString(), tomorrow);
     }
 
-    private long attemptsToday(Lead lead, Organization organization) {
-        ZoneId zone = zoneOf(organization);
+    private long attemptsToday(Lead lead, AppSettings settings) {
+        ZoneId zone = zoneOf(settings);
         OffsetDateTime startOfDay = OffsetDateTime.now(ZoneOffset.UTC)
                 .atZoneSameInstant(zone)
                 .toLocalDate()
@@ -786,20 +786,20 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         return callLogRepository.countByLeadIdAndDialStartedAtGreaterThanEqual(lead.getId(), startOfDay);
     }
 
-    private ZoneId zoneOf(Organization organization) {
+    private ZoneId zoneOf(AppSettings settings) {
         try {
-            return organization.getTimezone() == null || organization.getTimezone().isBlank()
+            return settings.getTimezone() == null || settings.getTimezone().isBlank()
                     ? ZoneId.of("Asia/Kolkata")
-                    : ZoneId.of(organization.getTimezone());
+                    : ZoneId.of(settings.getTimezone());
         } catch (RuntimeException ex) {
-            log.warn("Organization {} has an invalid timezone '{}'; falling back to Asia/Kolkata",
-                    organization.getIdAsString(), organization.getTimezone());
+            log.warn("app_settings has an invalid timezone '{}'; falling back to Asia/Kolkata",
+                    settings.getTimezone());
             return ZoneId.of("Asia/Kolkata");
         }
     }
 
-    private CallPolicy policyOf(Organization organization) {
-        return organization.getCallPolicy() != null ? organization.getCallPolicy() : CallPolicy.defaults();
+    private CallPolicy policyOf(AppSettings settings) {
+        return settings.getCallPolicy() != null ? settings.getCallPolicy() : CallPolicy.defaults();
     }
 
     private Lead requireLead(String leadId) {

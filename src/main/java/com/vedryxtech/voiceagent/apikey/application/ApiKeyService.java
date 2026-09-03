@@ -1,31 +1,32 @@
 package com.vedryxtech.voiceagent.apikey.application;
 
-import com.vedryxtech.voiceagent.organization.domain.Organization;
-
-import java.util.Optional;
-
 /**
- * API keys let the AI voice agent talk to this application without a human logging in.
+ * The API key the voice agent authenticates with. One installation, one key — the hash lives
+ * on the {@code app_settings} singleton.
  *
- * <p>The key is generated here, shown once, and only its SHA-256 hash is stored. That means a
- * lost key cannot be recovered - it is rotated instead - and a database dump contains no
+ * <p>The plaintext key is shown once, at creation, and only its SHA-256 hash is stored. That
+ * means a lost key cannot be recovered (rotate instead) and a database dump contains no
  * working credentials.</p>
  */
 public interface ApiKeyService {
 
-    /** Generates a new key for the organization, replacing any existing one. */
+    /** Generates a new key, replacing any existing one. */
     GeneratedKey generate();
 
     /** Seeds a specific key on first boot so a fresh checkout can be tested immediately. */
-    void seed(Organization organization, String plainKey);
+    void seed(String plainKey);
 
-    /** Resolves a presented key back to its organization, or empty when it is not valid. */
-    Optional<Organization> resolve(String plainKey);
+    /**
+     * Resolves a presented key back to a boolean. A match returns true; anything else
+     * (missing, unknown, no key configured) returns false. Kept minimal so the filter's
+     * only job is to check membership.
+     */
+    boolean matches(String plainKey);
 
-    /** Removes the key, immediately locking the AI agent out. */
+    /** Removes the key, immediately locking the agent out. */
     void revoke();
 
-    /** The full key, returned exactly once. After this only the prefix is ever visible. */
+    /** The full key, returned exactly once. */
     record GeneratedKey(String apiKey, String prefix) {
     }
 }

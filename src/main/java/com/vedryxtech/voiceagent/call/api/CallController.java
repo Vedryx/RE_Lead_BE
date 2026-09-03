@@ -16,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -54,10 +55,12 @@ public class CallController {
     }
 
     @Operation(summary = "Report what happened on the call",
-            description = "Call this once the call ends. It decides everything that happens next: retry later, "
-                    + "book the callback they asked for, or close the lead. "
-                    + "outcome says whether the phone connected; disposition says what the person agreed to.")
+            description = "Called by the voice agent (API_CLIENT). It decides everything that "
+                    + "happens next: retry later, book the callback they asked for, or close the "
+                    + "lead. outcome says whether the phone connected; disposition says what the "
+                    + "person agreed to.")
     @PostMapping(path = "/{callLogId}/outcome", consumes = "application/json")
+    @PreAuthorize("hasRole('API_CLIENT')")
     public CallLogResponse recordOutcome(@PathVariable String callLogId,
                                          @Valid @RequestBody CallOutcomeRequest request) {
         return callLogMapper.toResponse(orchestrationService.recordOutcome(callLogId, request));
@@ -65,6 +68,7 @@ public class CallController {
 
     @Operation(summary = "Get one call, with its full minute-by-minute timeline")
     @GetMapping("/{callLogId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public CallLogResponse getCallLog(@PathVariable String callLogId) {
         return callLogMapper.toResponse(callLogService.require(callLogId));
     }
@@ -73,6 +77,7 @@ public class CallController {
             description = "Filter by outcome (answered, no_answer, busy...), by what was agreed, "
                     + "by date, or by whether a recording exists.")
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public PageResponse<CallLogResponse> list(
             @RequestParam(required = false) String leadId,
             @RequestParam(required = false) String phone,
@@ -100,6 +105,7 @@ public class CallController {
     @Operation(summary = "All calls you can listen to",
             description = "Newest first. Each item has a recordingUrl you can open in any audio player.")
     @GetMapping("/recordings")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public PageResponse<CallLogResponse> recordings(
             @ParameterObject
             @PageableDefault(size = 20, sort = "recordingReadyAt", direction = Sort.Direction.DESC)
@@ -115,6 +121,7 @@ public class CallController {
                     + "that file until it expires, so do not pass them on. playable=false means "
                     + "the audio is still processing, was never recorded, or has aged out.")
     @GetMapping("/{callLogId}/recording")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public CallRecordingResponse recording(@PathVariable String callLogId) {
         var callLog = callLogService.require(callLogId);
         var links = artifacts.linksFor(callLog);

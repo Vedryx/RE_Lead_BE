@@ -6,6 +6,7 @@ import com.vedryxtech.voiceagent.dashboard.application.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,6 +43,7 @@ public class DashboardController {
                     + "Current status comes from the lead records; call history, outcomes and the "
                     + "trend come from the call log.")
     @GetMapping("/summary")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
     public DashboardSummaryResponse summary(
             @RequestParam(defaultValue = "month") DashboardRange range,
             @RequestParam(required = false)

@@ -1,4 +1,4 @@
-package com.vedryxtech.voiceagent.organization.domain;
+package com.vedryxtech.voiceagent.settings.domain;
 
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -8,11 +8,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Per-organization retry rules. Kept as data rather than code so a tenant can be tuned
- * without a redeploy, and so the dialler's decisions stay auditable.
+ * Global retry rules. Kept as data rather than code so the dialler can be tuned without
+ * a redeploy and its decisions stay auditable.
  *
  * <p>Backoff is keyed by the {@link CallOutcome} wire value and the calling window is stored
  * as {@code HH:mm} strings, so the stored BSON reads the same way the API does.</p>
+ *
+ * <p>Relocated from {@code organization.call_policy} to {@code app_settings.call_policy} as
+ * part of the single-tenant rework. Every {@code @Field} name is preserved, so existing
+ * embedded BSON documents deserialise unchanged.</p>
  */
 public class CallPolicy {
 

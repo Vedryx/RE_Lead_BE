@@ -8,7 +8,7 @@ import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
-import com.vedryxtech.voiceagent.organization.domain.Organization;
+import com.vedryxtech.voiceagent.settings.domain.AppSettings;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse;
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.CallStats;
@@ -17,7 +17,7 @@ import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.DayB
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Totals;
 import com.vedryxtech.voiceagent.dashboard.api.dto.DashboardSummaryResponse.Window;
 import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
+import com.vedryxtech.voiceagent.settings.application.SettingsService;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
@@ -57,17 +57,17 @@ public class DashboardServiceImpl implements DashboardService {
     private static final int MAX_TREND_DAYS = 90;
 
     private final MongoTemplate mongoTemplate;
-    private final OrganizationService organizationService;
+    private final SettingsService settingsService;
 
-    public DashboardServiceImpl(MongoTemplate mongoTemplate, OrganizationService organizationService) {
+    public DashboardServiceImpl(MongoTemplate mongoTemplate, SettingsService settingsService) {
         this.mongoTemplate = mongoTemplate;
-        this.organizationService = organizationService;
+        this.settingsService = settingsService;
     }
 
     @Override
     public DashboardSummaryResponse summary(DashboardRange range, OffsetDateTime from, OffsetDateTime to) {
-        Organization organization = organizationService.current();
-        ZoneId zone = zoneOf(organization);
+        AppSettings settings = settingsService.current();
+        ZoneId zone = zoneOf(settings);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
         DashboardRange effective = range == null ? DashboardRange.MONTH : range;
@@ -345,11 +345,11 @@ public class DashboardServiceImpl implements DashboardService {
         return spaced.substring(0, 1).toUpperCase(Locale.ROOT) + spaced.substring(1).toLowerCase(Locale.ROOT);
     }
 
-    private ZoneId zoneOf(Organization organization) {
+    private ZoneId zoneOf(AppSettings settings) {
         try {
-            return organization.getTimezone() == null || organization.getTimezone().isBlank()
+            return settings.getTimezone() == null || settings.getTimezone().isBlank()
                     ? ZoneId.of("Asia/Kolkata")
-                    : ZoneId.of(organization.getTimezone());
+                    : ZoneId.of(settings.getTimezone());
         } catch (RuntimeException ex) {
             return ZoneId.of("Asia/Kolkata");
         }

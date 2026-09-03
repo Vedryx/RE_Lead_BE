@@ -1,24 +1,17 @@
 package com.vedryxtech.voiceagent.auth.application;
 
-import com.vedryxtech.voiceagent.organization.domain.Organization;
-import com.vedryxtech.voiceagent.user.domain.User;
-import com.vedryxtech.voiceagent.user.domain.UserRole;
-import com.vedryxtech.voiceagent.user.api.dto.CreateUserRequest;
 import com.vedryxtech.voiceagent.auth.api.dto.LoginRequest;
 import com.vedryxtech.voiceagent.auth.api.dto.LoginResponse;
-import com.vedryxtech.voiceagent.organization.api.dto.RegisterOrganizationRequest;
-import com.vedryxtech.voiceagent.user.api.dto.UserResponse;
 import com.vedryxtech.voiceagent.exception.UnauthorizedException;
-import com.vedryxtech.voiceagent.user.mapper.AccountMapper;
 import com.vedryxtech.voiceagent.security.CurrentActor;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
+import com.vedryxtech.voiceagent.user.api.dto.UserResponse;
 import com.vedryxtech.voiceagent.user.application.UserService;
+import com.vedryxtech.voiceagent.user.domain.User;
+import com.vedryxtech.voiceagent.user.mapper.AccountMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-
-import java.util.Set;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -28,41 +21,25 @@ public class AuthServiceImpl implements AuthService {
     /** Same message for unknown email and wrong password, so the API cannot enumerate accounts. */
     private static final String BAD_CREDENTIALS = "Invalid email or password";
 
-    private final OrganizationService organizationService;
     private final UserService userService;
     private final AccessTokenService accessTokenService;
+    private final RefreshTokenService refreshTokenService;
     private final PasswordEncoder passwordEncoder;
     private final AccountMapper mapper;
     private final CurrentActor currentActor;
 
-    public AuthServiceImpl(OrganizationService organizationService,
-                           UserService userService,
+    public AuthServiceImpl(UserService userService,
                            AccessTokenService accessTokenService,
+                           RefreshTokenService refreshTokenService,
                            PasswordEncoder passwordEncoder,
                            AccountMapper mapper,
                            CurrentActor currentActor) {
-        this.organizationService = organizationService;
         this.userService = userService;
         this.accessTokenService = accessTokenService;
+        this.refreshTokenService = refreshTokenService;
         this.passwordEncoder = passwordEncoder;
         this.mapper = mapper;
         this.currentActor = currentActor;
-    }
-
-    @Override
-    public LoginResponse registerOrganization(RegisterOrganizationRequest request) {
-        Organization organization = organizationService.create(request);
-
-        CreateUserRequest adminRequest = new CreateUserRequest(
-                request.adminEmail(),
-                request.adminPassword(),
-                request.adminFullName(),
-                request.contactPhone(),
-                Set.of(UserRole.ORG_ADMIN));
-        User admin = userService.create(organization.getIdAsString(), adminRequest);
-
-        log.info("Registered organization {} with admin {}", organization.getSlug(), admin.getEmail());
-        return buildLoginResponse(admin, organization);
     }
 
     @Override
@@ -78,13 +55,25 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException("This account has been disabled");
         }
 
-        Organization organization = organizationService.require(user.getOrganizationId());
-        if (organization.getStatus() != null && !organization.getStatus().canLogIn()) {
-            throw new UnauthorizedException("This organization is suspended");
-        }
-
         userService.recordSuccessfulLogin(user);
-        return buildLoginResponse(user, organization);
+        return buildLoginResponse(user);
+    }
+
+    @Override
+    public LoginResponse refresh(String presentedRefreshToken) {
+        RefreshTokenService.Rotated rotated = refreshTokenService.rotate(presentedRefreshToken);
+        AccessTokenService.IssuedToken access = accessTokenService.issue(rotated.user());
+        return LoginResponse.bearer(
+                access.token(),
+                access.expiresInSeconds(),
+                rotated.newRefreshToken(),
+                rotated.expiresInSeconds(),
+                mapper.toResponse(rotated.user()));
+    }
+
+    @Override
+    public void logout(String presentedRefreshToken) {
+        refreshTokenService.revoke(presentedRefreshToken);
     }
 
     @Override
@@ -95,12 +84,14 @@ public class AuthServiceImpl implements AuthService {
         return mapper.toResponse(userService.require(userId));
     }
 
-    private LoginResponse buildLoginResponse(User user, Organization organization) {
-        AccessTokenService.IssuedToken token = accessTokenService.issue(user, organization);
+    private LoginResponse buildLoginResponse(User user) {
+        AccessTokenService.IssuedToken access = accessTokenService.issue(user);
+        RefreshTokenService.Issued refresh = refreshTokenService.issue(user);
         return LoginResponse.bearer(
-                token.token(),
-                token.expiresInSeconds(),
-                mapper.toResponse(user),
-                mapper.toResponse(organization));
+                access.token(),
+                access.expiresInSeconds(),
+                refresh.token(),
+                refresh.expiresInSeconds(),
+                mapper.toResponse(user));
     }
 }

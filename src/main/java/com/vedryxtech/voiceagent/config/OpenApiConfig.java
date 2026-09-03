@@ -19,7 +19,7 @@ import java.util.List;
  * Swagger UI at {@code /docs}.
  *
  * <p>The description doubles as the instructions for getting a credential, since everything
- * except login and organization signup needs one.</p>
+ * except {@code /api/v1/auth/*} needs one.</p>
  */
 @Configuration
 public class OpenApiConfig {
@@ -41,7 +41,8 @@ public class OpenApiConfig {
             3. Click the green **Authorize** button at the top right, paste it under
                **bearerAuth**, Authorize, Close.
 
-            Every endpoint on this page now works. The token lasts 12 hours.
+            Every endpoint on this page now works. The access token lasts 15 minutes;
+            swap the refresh token at **POST /api/v1/auth/refresh** for a fresh one.
 
             **The AI voice agent** - no login, just its key:
 

@@ -1,8 +1,7 @@
 package com.vedryxtech.voiceagent.apikey.application;
 
-import com.vedryxtech.voiceagent.organization.domain.Organization;
-import com.vedryxtech.voiceagent.organization.persistence.OrganizationRepository;
-import com.vedryxtech.voiceagent.organization.application.OrganizationService;
+import com.vedryxtech.voiceagent.settings.application.SettingsService;
+import com.vedryxtech.voiceagent.settings.domain.AppSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,7 +14,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.Optional;
 
 @Service
 public class ApiKeyServiceImpl implements ApiKeyService {
@@ -27,57 +25,61 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     private static final int RANDOM_BYTES = 32;
     private static final int VISIBLE_PREFIX_LENGTH = 12;
 
-    private final OrganizationRepository repository;
-    private final OrganizationService organizationService;
+    private final SettingsService settingsService;
     private final SecureRandom random = new SecureRandom();
 
-    public ApiKeyServiceImpl(OrganizationRepository repository, OrganizationService organizationService) {
-        this.repository = repository;
-        this.organizationService = organizationService;
+    public ApiKeyServiceImpl(SettingsService settingsService) {
+        this.settingsService = settingsService;
     }
 
     @Override
     public GeneratedKey generate() {
-        Organization organization = organizationService.current();
+        AppSettings settings = settingsService.current();
         String plainKey = newKey();
-        apply(organization, plainKey);
-        log.info("Issued a new API key for organization {}", organization.getSlug());
-        return new GeneratedKey(plainKey, organization.getApiKeyPrefix());
+        apply(settings, plainKey);
+        log.info("Issued a new API key");
+        return new GeneratedKey(plainKey, settings.getApiKeyPrefix());
     }
 
     @Override
-    public void seed(Organization organization, String plainKey) {
-        apply(organization, plainKey);
-        log.warn("Seeded the development API key for organization {} - rotate it before going live",
-                organization.getSlug());
+    public void seed(String plainKey) {
+        AppSettings settings = settingsService.current();
+        apply(settings, plainKey);
+        log.warn("Seeded the development API key - rotate it before going live");
     }
 
     @Override
-    public Optional<Organization> resolve(String plainKey) {
+    public boolean matches(String plainKey) {
         if (plainKey == null || plainKey.isBlank()) {
-            return Optional.empty();
+            return false;
         }
-        return repository.findByApiKeyHash(sha256(plainKey.trim()));
+        String stored = settingsService.current().getApiKeyHash();
+        if (stored == null || stored.isBlank()) {
+            return false;
+        }
+        // Constant-time comparison: neither branch of the equality check should leak
+        // whether a real key was configured at all.
+        return MessageDigest.isEqual(
+                stored.getBytes(StandardCharsets.US_ASCII),
+                sha256(plainKey.trim()).getBytes(StandardCharsets.US_ASCII));
     }
 
     @Override
     public void revoke() {
-        Organization organization = organizationService.current();
-        organization.setApiKeyHash(null);
-        organization.setApiKeyPrefix(null);
-        organization.setApiKeyCreatedAt(null);
-        organization.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-        repository.save(organization);
-        log.warn("Revoked the API key for organization {}", organization.getSlug());
+        AppSettings settings = settingsService.current();
+        settings.setApiKeyHash(null);
+        settings.setApiKeyPrefix(null);
+        settings.setApiKeyCreatedAt(null);
+        settingsService.save(settings);
+        log.warn("Revoked the API key");
     }
 
-    private void apply(Organization organization, String plainKey) {
+    private void apply(AppSettings settings, String plainKey) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        organization.setApiKeyHash(sha256(plainKey));
-        organization.setApiKeyPrefix(plainKey.substring(0, Math.min(VISIBLE_PREFIX_LENGTH, plainKey.length())));
-        organization.setApiKeyCreatedAt(now);
-        organization.setUpdatedAt(now);
-        repository.save(organization);
+        settings.setApiKeyHash(sha256(plainKey));
+        settings.setApiKeyPrefix(plainKey.substring(0, Math.min(VISIBLE_PREFIX_LENGTH, plainKey.length())));
+        settings.setApiKeyCreatedAt(now);
+        settingsService.save(settings);
     }
 
     private String newKey() {

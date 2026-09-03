@@ -25,6 +25,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,11 +42,17 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.time.OffsetDateTime;
 
-/** CRUD over the {@code lead} collection, scoped to the organization on the access token. */
+/**
+ * CRUD over the {@code lead} collection. Single-tenant now, so no organization scoping.
+ *
+ * <p>Every method is restricted to ADMIN or MEMBER — API_CLIENT (the voice agent) must not
+ * reach any of these; its surface is the four agent endpoints plus the settings GET.</p>
+ */
 @Tag(name = "5. Leads",
-        description = "The people to call. One record per phone number, per company.")
+        description = "The people to call. One record per phone number.")
 @RestController
 @RequestMapping(path = "/api/v1/leads", produces = "application/json")
+@PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
 public class LeadController {
 
     private final LeadService service;

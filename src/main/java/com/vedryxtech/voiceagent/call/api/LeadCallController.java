@@ -12,6 +12,7 @@ import com.vedryxtech.voiceagent.call.application.LeadCallLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,10 +24,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * Human-triggered call actions ("Call now" button, manual reschedule, history read). All
+ * gated to ADMIN/MEMBER — API_CLIENT (the voice agent) is confined to its own four queue
+ * endpoints and must not reach these.
+ */
 @Tag(name = "6. Lead Calls",
         description = "Lead-specific call actions and call history.")
 @RestController
 @RequestMapping(path = "/api/v1/leads/{leadId}", produces = "application/json")
+@PreAuthorize("hasAnyRole('ADMIN', 'MEMBER')")
 public class LeadCallController {
 
     private final CallOrchestrationService orchestrationService;
