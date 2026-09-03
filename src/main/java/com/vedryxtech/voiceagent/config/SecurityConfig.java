@@ -4,6 +4,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.vedryxtech.voiceagent.apikey.application.ApiKeyService;
 import com.vedryxtech.voiceagent.common.error.ApiErrorResponseWriter;
 import com.vedryxtech.voiceagent.security.ApiKeyAuthenticationFilter;
+import com.vedryxtech.voiceagent.security.DatabaseUserJwtAuthenticationConverter;
+import com.vedryxtech.voiceagent.user.persistence.UserRepository;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,8 +22,6 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -59,7 +59,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http,
                                            ApiErrorResponseWriter apiErrorResponseWriter,
-                                           ApiKeyAuthenticationFilter apiKeyAuthenticationFilter) throws Exception {
+                                           ApiKeyAuthenticationFilter apiKeyAuthenticationFilter,
+                                           DatabaseUserJwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
@@ -77,7 +78,7 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint((request, response, ex) ->
                                 apiErrorResponseWriter.write(response, request.getRequestURI(),
@@ -92,22 +93,19 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * Authorities come from the database user, not the token's {@code roles} claim, so a forged or
+     * stale token cannot escalate privileges and a deleted/disabled user loses access immediately.
+     */
+    @Bean
+    public DatabaseUserJwtAuthenticationConverter jwtAuthenticationConverter(UserRepository userRepository) {
+        return new DatabaseUserJwtAuthenticationConverter(userRepository);
+    }
+
     @Bean
     public ApiKeyAuthenticationFilter apiKeyAuthenticationFilter(@Lazy ApiKeyService apiKeyService,
                                                                  ApiErrorResponseWriter apiErrorResponseWriter) {
         return new ApiKeyAuthenticationFilter(apiKeyService, apiErrorResponseWriter);
-    }
-
-    /** Roles travel in the {@code roles} claim as bare names and become {@code ROLE_*} authorities. */
-    @Bean
-    public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName("roles");
-        authorities.setAuthorityPrefix("ROLE_");
-
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(authorities);
-        return converter;
     }
 
     @Bean
