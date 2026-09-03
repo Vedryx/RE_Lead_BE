@@ -81,21 +81,21 @@ app:
   # cannot dispatch the call that would wake it, so the dialler had to live
   # somewhere always on, and the service that owns the queue is the shortest answer.
   dispatch:
-    enabled: ${DISPATCH_ENABLED:false}
+    enabled: ${DISPATCH_ENABLED:true}
     # Three is comfortable. LiveKit's Build plan refuses a sixth concurrent agent
     # session, so five is the hard ceiling above this one.
     max-concurrent: ${DISPATCH_MAX_CONCURRENT:3}
     poll-seconds: 15
-    livekit-url: ${LIVEKIT_URL:}
+    livekit-url: ${LIVEKIT_URL:wss://highrise-sn6i8vmc.livekit.cloud}
     agent-name: ${LIVEKIT_AGENT_NAME:the-real-estate}
-    outbound-trunk-id: ${LIVEKIT_OUTBOUND_TRUNK_ID:}
-    caller-id: ${PLIVO_PHONE_NUMBER:}
+    outbound-trunk-id: ${LIVEKIT_OUTBOUND_TRUNK_ID:ST_y6eo5HFw3LLt}
+    caller-id: ${PLIVO_PHONE_NUMBER:+918031906513}
 
   # Verifying that an egress webhook really came from LiveKit. Same key and secret
   # the agent dials with; without them every webhook is refused.
   livekit:
-    api-key: ${LIVEKIT_API_KEY:}
-    api-secret: ${LIVEKIT_API_SECRET:}
+    api-key: ${LIVEKIT_API_KEY:APIygQsqh49X6uE}
+    api-secret: ${LIVEKIT_API_SECRET:8h5G7fQ6GedBGrc181komJtF2yMYEfr7hYObh3FChq4B}
 
   # Call artifacts: the audio and the transcript, one prefix per call.
   # Off by default — with no bucket the CRM still records calls and transcripts in
