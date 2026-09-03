@@ -25,6 +25,7 @@ import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.call.persistence.LeadCallLogRepository;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
 import com.vedryxtech.voiceagent.storage.CallArtifactService;
+import com.vedryxtech.voiceagent.whatsapp.WhatsAppNotificationService;
 import com.vedryxtech.voiceagent.call.domain.TranscriptTurn;
 import com.vedryxtech.voiceagent.security.CurrentActor;
 import com.vedryxtech.voiceagent.settings.application.SettingsService;
@@ -95,6 +96,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private final CallPolicyProperties dialerProperties;
     private final CurrentActor currentActor;
     private final CallArtifactService artifacts;
+    private final WhatsAppNotificationService whatsAppNotificationService;
 
     public CallOrchestrationServiceImpl(LeadRepository leadRepository,
                                         LeadCallLogRepository callLogRepository,
@@ -102,7 +104,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                                         MongoTemplate mongoTemplate,
                                         CallPolicyProperties dialerProperties,
                                         CurrentActor currentActor,
-                                        CallArtifactService artifacts) {
+                                        CallArtifactService artifacts,
+                                        WhatsAppNotificationService whatsAppNotificationService) {
         this.leadRepository = leadRepository;
         this.callLogRepository = callLogRepository;
         this.settingsService = settingsService;
@@ -110,6 +113,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         this.dialerProperties = dialerProperties;
         this.currentActor = currentActor;
         this.artifacts = artifacts;
+        this.whatsAppNotificationService = whatsAppNotificationService;
     }
 
     // ------------------------------------------------------------------ claim
@@ -745,6 +749,10 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 // backoff, skipping the exhaustion check that scheduleRetry runs.
                 parkFollowUp(lead, callLog, settings, policy, now,
                         "Details requested; follow-up parked without spending an attempt");
+                // Best-effort, and after the pipeline decision rather than before: a failed
+                // send must never stop the lead reaching FOLLOW_UP. See the class comment on
+                // WhatsAppNotificationService for why this never throws back into here.
+                whatsAppNotificationService.sendProjectDetails(lead);
             }
             case INTERESTED -> {
                 // Interested but nothing agreed: still ours to chase, not a discard.

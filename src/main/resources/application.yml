@@ -97,6 +97,15 @@ app:
     # that one pasted into a chat is dead before it travels.
     link-ttl: 15m
 
+  # "Send me details" on a call -> WhatsApp. Off until a WhatsApp Business
+  # Platform app exists: with no phone-number-id/access-token, a lead is still
+  # flagged as wanting details, it just sits there for a person to send by hand.
+  whatsapp:
+    enabled: true
+    api-base-url: https://graph.facebook.com/v25.0
+    phone-number-id: 1301716996357657
+    access-token: EAAUor2ijjosBSZAI6ZBFZCCzsZAjopWxMRnig82hgvQdLvJs8d7BvvRZC7CZB5ZCMZCAmSAMWjfFEFsW40jEjHQXLgwYnZBEfQPFmyHRp6NR7P9LZCgZCMuW3KFtsol8axoXv3NNOOsdZBgWiVLxwpqw2NmaUAEF5IraB1JjUl2d9A3jcMZBOKocSBfa4US4vQdAsyQZDZD
+
   dialer:
     # Background sweep that returns calls abandoned mid-dial to the queue.
     # On from Phase 3: an automatic dialler means leads get stranded in "dialing"

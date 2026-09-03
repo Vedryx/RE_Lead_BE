@@ -32,6 +32,12 @@ public class ObjectStorageProperties {
     private String prefix = "recordings";
 
     /**
+     * Where a project's brochure and photos live: one folder per project, everything
+     * the "send details on WhatsApp" flow can hand out kept together under it.
+     */
+    private String projectMediaPrefix = "project-details";
+
+    /**
      * How long a minted link stays valid.
      *
      * <p>Long enough to press play, short enough that a URL pasted into a chat is dead
@@ -94,6 +100,14 @@ public class ObjectStorageProperties {
 
     public void setPrefix(String prefix) {
         this.prefix = prefix;
+    }
+
+    public String getProjectMediaPrefix() {
+        return projectMediaPrefix;
+    }
+
+    public void setProjectMediaPrefix(String projectMediaPrefix) {
+        this.projectMediaPrefix = projectMediaPrefix;
     }
 
     public Duration getLinkTtl() {
