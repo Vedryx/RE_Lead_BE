@@ -82,21 +82,22 @@ public class OutboundDialScheduler {
             return;
         }
 
-        long due = orchestration.dueCount();
-        if (due == 0) {
-            return;
-        }
-
+        // Deliberately not gated on dueCount. That counts leads in a claimable pipeline
+        // status, and "Call now" moves a lead straight to DIALING — so a manual call
+        // reads as zero due and would be skipped, even though claimNext is exactly what
+        // picks its undialled attempt up.
         int live = livekit.liveCallCount();
         int free = properties.getMaxConcurrent() - live;
         if (free <= 0) {
-            log.info("{} due, but {} already in progress at a ceiling of {} — waiting",
-                    due, live, properties.getMaxConcurrent());
+            log.info("{} call(s) already in progress at a ceiling of {} — waiting",
+                    live, properties.getMaxConcurrent());
             return;
         }
 
-        int wanted = (int) Math.min(free, due);
-        List<CallOrchestrationService.CallSession> claimed = orchestration.claimNext(wanted);
+        List<CallOrchestrationService.CallSession> claimed = orchestration.claimNext(free);
+        if (claimed.isEmpty()) {
+            return;
+        }
         for (CallOrchestrationService.CallSession session : claimed) {
             try {
                 dial(session, policy);

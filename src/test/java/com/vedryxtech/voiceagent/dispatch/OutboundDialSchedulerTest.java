@@ -63,20 +63,31 @@ class OutboundDialSchedulerTest {
     }
 
     @Test
-    void an_empty_queue_claims_nothing() {
-        when(orchestration.dueCount()).thenReturn(0L);
+    void an_empty_queue_dials_nothing() {
+        when(orchestration.claimNext(anyInt())).thenReturn(List.of());
 
         scheduler.dialWhatIsDue();
 
-        verify(orchestration, never()).claimNext(anyInt());
-        verify(livekit, never()).liveCallCount();
+        verify(livekit, never()).dispatchAgent(anyString(), anyString());
+    }
+
+    @Test
+    void a_call_now_attempt_is_picked_up_even_though_nothing_reads_as_due() {
+        // "Call now" moves the lead straight to DIALING, so dueCount is zero. Gating on
+        // it meant a manual call created an attempt that nothing ever looked for.
+        when(orchestration.dueCount()).thenReturn(0L);
+        when(livekit.liveCallCount()).thenReturn(0);
+        when(orchestration.claimNext(anyInt())).thenReturn(List.of(session("+919000000001")));
+
+        scheduler.dialWhatIsDue();
+
+        verify(livekit).dialOut(anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
     void it_claims_only_as_many_as_there_are_free_slots() {
         // Ten due, two already in progress, ceiling of three: exactly one may be taken.
         // Claiming the other nine would strand them in dialing for fifteen minutes.
-        when(orchestration.dueCount()).thenReturn(10L);
         when(livekit.liveCallCount()).thenReturn(2);
         when(orchestration.claimNext(1)).thenReturn(List.of(session("+919000000001")));
 
@@ -86,10 +97,9 @@ class OutboundDialSchedulerTest {
     }
 
     @Test
-    void it_never_claims_more_than_are_due() {
-        when(orchestration.dueCount()).thenReturn(1L);
-        when(livekit.liveCallCount()).thenReturn(0);
-        when(orchestration.claimNext(1)).thenReturn(List.of(session("+919000000001")));
+    void it_asks_for_exactly_the_free_slots() {
+        when(livekit.liveCallCount()).thenReturn(2);
+        when(orchestration.claimNext(anyInt())).thenReturn(List.of());
 
         scheduler.dialWhatIsDue();
 
@@ -98,7 +108,6 @@ class OutboundDialSchedulerTest {
 
     @Test
     void at_the_ceiling_it_claims_nothing_at_all() {
-        when(orchestration.dueCount()).thenReturn(5L);
         when(livekit.liveCallCount()).thenReturn(3);
 
         scheduler.dialWhatIsDue();
@@ -162,13 +171,12 @@ class OutboundDialSchedulerTest {
 
         nightScheduler.dialWhatIsDue();
 
-        verify(orchestration, never()).dueCount();
         verify(orchestration, never()).claimNext(anyInt());
     }
 
     @Test
     void a_failed_pass_never_kills_the_scheduler_thread() {
-        when(orchestration.dueCount()).thenThrow(new RuntimeException("mongo is away"));
+        when(livekit.liveCallCount()).thenThrow(new RuntimeException("livekit is away"));
 
         assertThatCode(() -> scheduler.dialWhatIsDue()).doesNotThrowAnyException();
     }
