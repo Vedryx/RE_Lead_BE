@@ -14,6 +14,15 @@ public enum CallDisposition implements WireValue {
     DETAILS_REQUESTED("detailsRequested"),
     INTERESTED("interested"),
     NOT_INTERESTED("notInterested"),
+
+    /** Said no to a site visit but yes to fifteen minutes. */
+    MEETING_BOOKED("meetingBooked"),
+
+    /** Not interested themselves, but gave us somebody who might be. */
+    REFERRAL_GIVEN("referralGiven"),
+
+    /** No for now, but agreed to keep hearing from us on WhatsApp. */
+    STAY_IN_TOUCH("stayInTouch"),
     DO_NOT_CALL("doNotCall"),
     WRONG_NUMBER("wrongNumber"),
     LANGUAGE_BARRIER("languageBarrier"),

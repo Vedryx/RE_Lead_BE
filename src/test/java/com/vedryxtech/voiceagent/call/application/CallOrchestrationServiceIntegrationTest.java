@@ -109,7 +109,8 @@ class CallOrchestrationServiceIntegrationTest {
                 null, 5, 100, "Wants 3 BHK", null,
                 null, siteVisitAt, null,
                 null, null, null, null, null, null,
-                null, null);
+                null, null,
+                null, null, null);
     }
 
     private CallOutcomeRequest noAnswer() {
@@ -117,7 +118,8 @@ class CallOrchestrationServiceIntegrationTest {
                 CallOutcome.NO_ANSWER, null, null, 20, 0, null, null,
                 null, null, null,
                 null, null, null, null, null, null,
-                null, null);
+                null, null,
+                null, null, null);
     }
 
     private CallOutcomeRequest answered(CallDisposition disposition) {
@@ -125,7 +127,8 @@ class CallOrchestrationServiceIntegrationTest {
                 CallOutcome.ANSWERED, disposition, null, 5, 60, "s", null,
                 null, null, null,
                 null, null, null, null, null, null,
-                null, null);
+                null, null,
+                null, null, null);
     }
 
     private CallOutcomeRequest cancelled() {
@@ -133,7 +136,8 @@ class CallOrchestrationServiceIntegrationTest {
                 CallOutcome.CANCELLED, null, null, 0, 0, null, null,
                 null, null, null,
                 null, null, null, null, null, null,
-                null, null);
+                null, null,
+                null, null, null);
     }
 
     private CallOutcomeRequest invalidNumber() {
@@ -141,7 +145,8 @@ class CallOrchestrationServiceIntegrationTest {
                 CallOutcome.INVALID_NUMBER, null, null, 0, 0, null, null,
                 null, null, null,
                 null, null, null, null, null, null,
-                null, null);
+                null, null,
+                null, null, null);
     }
 
     // ============================================================ BLK-3 (staleness)

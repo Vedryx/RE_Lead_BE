@@ -134,6 +134,13 @@ public class Lead {
     private ObjectId lastCallLogId;
 
     /** Hard suppression: set by a DO_NOT_CALL disposition and never cleared by the dialler. */
+    /**
+     * The lead who gave us this name. Set only on referrals, and the reason a
+     * referral is worth more than a cold number: somebody vouched for it.
+     */
+    @Field("referred_by_lead_id")
+    private ObjectId referredByLeadId;
+
     @Field("do_not_call")
     private Boolean doNotCall = Boolean.FALSE;
 
@@ -384,6 +391,14 @@ public class Lead {
 
     public void setLastCallLogId(ObjectId lastCallLogId) {
         this.lastCallLogId = lastCallLogId;
+    }
+
+    public ObjectId getReferredByLeadId() {
+        return referredByLeadId;
+    }
+
+    public void setReferredByLeadId(ObjectId referredByLeadId) {
+        this.referredByLeadId = referredByLeadId;
     }
 
     public Boolean getDoNotCall() {

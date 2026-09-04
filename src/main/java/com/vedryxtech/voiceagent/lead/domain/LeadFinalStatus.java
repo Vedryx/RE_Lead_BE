@@ -12,6 +12,9 @@ public enum LeadFinalStatus implements WireValue {
     SITE_VISIT_DONE("siteVisitDone"),
     INTERESTED("interested"),
     NOT_INTERESTED("notInterested"),
+
+    /** Declined, but left the door open — worth a human's attention, not a dial. */
+    STAY_IN_TOUCH("stayInTouch"),
     /** Talked but never committed. Distinct from UNREACHABLE, which means we never spoke. */
     NO_DECISION("noDecision"),
     UNREACHABLE("unreachable"),
