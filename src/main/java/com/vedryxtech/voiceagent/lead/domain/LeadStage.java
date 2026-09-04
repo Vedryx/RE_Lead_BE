@@ -29,7 +29,27 @@ public enum LeadStage implements WireValue {
     /** A person owes them a call. The agent must not dial these. */
     CALLBACK_REQUESTED("callbackRequested", 2),
     /** Visit booked. Reached by the agent only through "Call now", for a reminder. */
-    SITE_VISIT("siteVisit", 3),
+    /**
+     * Said no, but agreed to keep hearing from us. Not a discard: the door is open,
+     * it is just not the agent's to knock on again.
+     */
+    NURTURE("nurture", 3),
+
+    /**
+     * Agreed to fifteen minutes rather than a site visit — the step a lead who said
+     * no will still take. Ranked below a visit because it is a step toward one.
+     */
+    MEETING("meeting", 4),
+
+    SITE_VISIT("siteVisit", 5),
+
+    /**
+     * Somebody else's name, given by a lead who was not interested themselves.
+     * Never dialled automatically: they did not ask to be called, and a stranger
+     * being rung by an AI because an acquaintance mentioned them is exactly the
+     * consent problem the stage gate exists to prevent.
+     */
+    REFERRAL("referral", 0),
     /** Out of the funnel, for any reason. See finalStatus for which. */
     DISCARDED("discarded", -1);
 

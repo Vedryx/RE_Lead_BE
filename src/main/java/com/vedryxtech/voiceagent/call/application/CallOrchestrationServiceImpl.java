@@ -279,6 +279,57 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 "Transcript captured: " + turns.size() + " turn(s)"));
     }
 
+    /**
+     * Turn a name given on a call into a lead of its own.
+     *
+     * <p>Lands in the referral stage, which no scheduler will claim. The person named
+     * never asked to be called, and ringing a stranger because an acquaintance
+     * mentioned them is exactly what the stage gate exists to prevent — somebody
+     * decides to call them, or nobody does.
+     *
+     * <p>Best-effort. A duplicate number, or any other failure, must not cost us the
+     * outcome of the call that produced it.
+     */
+    private void captureReferral(Lead referrer, CallOutcomeRequest request) {
+        String name = request.referralName();
+        String phone = request.referralPhone();
+        if (name == null || name.isBlank() || phone == null || phone.isBlank()) {
+            return;
+        }
+        try {
+            String normalised = PhoneNumbers.normalize(phone);
+            if (leadRepository.existsByCallingPhone(normalised)) {
+                log.info("Referral {} from lead {} is already a lead", normalised,
+                        referrer.getIdAsString());
+                return;
+            }
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+            Lead referred = new Lead();
+            referred.setName(name.trim());
+            referred.setPhone(normalised);
+            referred.setCallingPhone(normalised);
+            referred.setProject(referrer.getProject());
+            referred.setSource("referral");
+            referred.setStage(LeadStage.REFERRAL);
+            referred.setPipelineStatus(LeadPipelineStatus.NEW);
+            referred.setReferredByLeadId(referrer.getId());
+            referred.setAttemptCount(0);
+            referred.setConnectedCount(0);
+            referred.setTotalTalkSeconds(0);
+            referred.setDoNotCall(Boolean.FALSE);
+            // No next attempt: this lead is not the agent's to dial.
+            referred.setNextAttemptAt(null);
+            referred.setCreatedAt(now);
+            referred.setUpdatedAt(now);
+            leadRepository.save(referred);
+            log.info("Captured referral {} from lead {}", referred.getIdAsString(),
+                    referrer.getIdAsString());
+        } catch (RuntimeException ex) {
+            log.error("Could not capture the referral from lead {}: {}",
+                    referrer.getIdAsString(), ex.getMessage());
+        }
+    }
+
     private CallContext contextFor(Lead lead, LeadCallLog current) {
         List<CallContext.PriorCall> priors = callLogRepository
                 .findByLeadIdOrderByAttemptNumberDesc(lead.getId()).stream()
@@ -538,6 +589,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                                         + "; outcome logged, pipeline unchanged"));
             } else {
                 applyLeadDetailsFromCall(lead, request);
+        captureReferral(lead, request);
                 lead.setLastOutcome(outcome);
                 lead.setLastAttemptAt(now);
                 lead.setTotalTalkSeconds(orZero(lead.getTotalTalkSeconds()) + orZero(callLog.getTalkSeconds()));
@@ -762,6 +814,33 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             case NOT_INTERESTED -> {
                 advanceStage(lead, LeadStage.DISCARDED);
                 close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.NOT_INTERESTED);
+            }
+            case MEETING_BOOKED -> {
+                // A no to a site visit is not a no to fifteen minutes, and this is the
+                // step a lead who declined will still take. Owned by a person from here.
+                lead.setActionType(ActionType.MEETING);
+                lead.setStatus(LeadStatus.SCHEDULED);
+                lead.setScheduledFor(request.meetingAt());
+                advanceStage(lead, LeadStage.MEETING);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.INTERESTED);
+            }
+            case REFERRAL_GIVEN -> {
+                // They are done; the name they gave is not. Their own lead closes as
+                // not interested, which is what they said.
+                advanceStage(lead, LeadStage.DISCARDED);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.NOT_INTERESTED);
+            }
+            case STAY_IN_TOUCH -> {
+                // Declined, but left the door open. Not a discard — a discard is a lead
+                // nobody looks at again, and this one asked to keep hearing from us.
+                if (lead.getWhatsappPhone() == null) {
+                    lead.setWhatsappPhone(lead.getCallingPhone());
+                }
+                lead.setActionType(ActionType.WHATSAPP_PROJECT_DETAILS);
+                lead.setStatus(LeadStatus.REQUESTED);
+                advanceStage(lead, LeadStage.NURTURE);
+                close(lead, LeadPipelineStatus.COMPLETED, LeadFinalStatus.STAY_IN_TOUCH);
+                whatsAppNotificationService.sendProjectDetails(lead);
             }
             case UNQUALIFIED -> {
                 advanceStage(lead, LeadStage.DISCARDED);

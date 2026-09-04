@@ -93,4 +93,45 @@ class LeadStageTest {
         assertThat(java.util.Arrays.stream(LeadStage.values()).filter(LeadStage::isTerminal).toList())
                 .containsExactly(LeadStage.DISCARDED);
     }
+
+    // --- what a "no" can still become ---
+
+    @Test
+    void a_meeting_is_a_step_toward_a_visit_not_past_it() {
+        // A lead who agreed to fifteen minutes can still book a site visit later.
+        assertThat(LeadStage.MEETING.advanceTo(LeadStage.SITE_VISIT))
+                .isEqualTo(LeadStage.SITE_VISIT);
+        assertThat(LeadStage.SITE_VISIT.advanceTo(LeadStage.MEETING))
+                .isEqualTo(LeadStage.SITE_VISIT);
+    }
+
+    @Test
+    void nurture_is_not_a_discard() {
+        // "No for now, keep me posted" is a different lead from "go away", and the
+        // difference is worth keeping: one is still reachable by a person.
+        assertThat(LeadStage.NURTURE.isTerminal()).isFalse();
+        assertThat(LeadStage.NURTURE.advanceTo(LeadStage.SITE_VISIT))
+                .isEqualTo(LeadStage.SITE_VISIT);
+    }
+
+    @Test
+    void a_referral_is_never_dialled_automatically() {
+        // They did not ask to be called. A stranger being rung by an AI because an
+        // acquaintance gave their number is the consent problem this gate exists for.
+        assertThat(LeadStage.REFERRAL.isAgentCallable()).isFalse();
+    }
+
+    @Test
+    void neither_meeting_nor_nurture_is_agent_callable() {
+        // Both belong to a person from that point on.
+        assertThat(LeadStage.MEETING.isAgentCallable()).isFalse();
+        assertThat(LeadStage.NURTURE.isAgentCallable()).isFalse();
+    }
+
+    @Test
+    void every_stage_still_round_trips_through_its_wire_value() {
+        for (LeadStage stage : LeadStage.values()) {
+            assertThat(LeadStage.fromValue(stage.getValue())).isEqualTo(stage);
+        }
+    }
 }

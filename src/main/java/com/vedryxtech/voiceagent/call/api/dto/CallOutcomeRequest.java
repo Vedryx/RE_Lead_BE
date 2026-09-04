@@ -88,6 +88,20 @@ public record CallOutcomeRequest(
         @Size(max = 1000)
         String errorMessage,
 
+        // --- what a "no" was turned into ---
+
+        @Schema(description = "When disposition is meetingBooked: the fifteen minutes agreed")
+        OffsetDateTime meetingAt,
+
+        @Size(max = 150)
+        @Schema(description = "A name this lead gave us, when they had no interest themselves")
+        String referralName,
+
+        @Size(max = 25)
+        @Schema(description = "The referred person's number. Creates a lead in the referral "
+                + "stage, which is never dialled automatically — they did not ask to be called.")
+        String referralPhone,
+
         // --- what was actually said ---
 
         @Valid

@@ -13,6 +13,9 @@ public enum ActionType implements WireValue {
 
     TEAM_CALLBACK("teamCallback"),
     SITE_VISIT("siteVisit"),
+
+    /** Fifteen minutes to walk them through the project, short of a site visit. */
+    MEETING("meeting"),
     FOLLOW_UP_CALL("followUpCall"),
     WHATSAPP_PROJECT_DETAILS("whatsappProjectDetails");
 
