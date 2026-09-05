@@ -1,5 +1,6 @@
 package com.vedryxtech.voiceagent.lead.api.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
@@ -52,6 +53,13 @@ public record LeadResponse(
         String assignedTo,
         String source,
         String campaign,
+
+        @Schema(description = "The lead who gave us this name, when this one was referred")
+        String referredBy,
+
+        @Schema(description = "What the referrer said about them, and the context their own "
+                + "call opens with")
+        String referralSummary,
 
         String lastRecordingUrl
 ) {

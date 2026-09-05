@@ -217,7 +217,7 @@ class OutboundDialSchedulerTest {
 
     private static CallContext context(ActionType pending, int attempts, int connects) {
         return new CallContext("My Home Sanctuary", LeadStage.NEW, pending, null, null, null,
-                null, attempts, connects, List.of());
+                null, null, null, attempts, connects, List.of());
     }
 
     /** Runs one pass and returns the metadata the agent would have been handed. */

@@ -141,6 +141,17 @@ public class Lead {
     @Field("referred_by_lead_id")
     private ObjectId referredByLeadId;
 
+    /**
+     * What the referrer said about this person, in their own call's words: what they are
+     * looking for, and who is vouching for them.
+     *
+     * <p>This is the whole point of a referral. Without it the agent opens a cold call to a
+     * stranger who never enquired; with it, it can open by naming who passed the number on
+     * and what they were told this person wants.</p>
+     */
+    @Field("referral_summary")
+    private String referralSummary;
+
     @Field("do_not_call")
     private Boolean doNotCall = Boolean.FALSE;
 
@@ -399,6 +410,14 @@ public class Lead {
 
     public void setReferredByLeadId(ObjectId referredByLeadId) {
         this.referredByLeadId = referredByLeadId;
+    }
+
+    public String getReferralSummary() {
+        return referralSummary;
+    }
+
+    public void setReferralSummary(String referralSummary) {
+        this.referralSummary = referralSummary;
     }
 
     public Boolean getDoNotCall() {

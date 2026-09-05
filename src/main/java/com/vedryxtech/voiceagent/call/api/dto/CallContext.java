@@ -41,6 +41,14 @@ public record CallContext(
 
         String whatsappPhone,
 
+        @Schema(description = "Set when this lead was referred: what the person who gave us "
+                + "the number said about them, and who that was. The agent opens with this "
+                + "rather than introducing itself to a stranger who never enquired.")
+        String referralSummary,
+
+        @Schema(description = "The name of the lead who referred them, when known")
+        String referredByName,
+
         @Schema(description = "How many times we have tried, including this call")
         int previousAttempts,
 

@@ -102,6 +102,12 @@ public record CallOutcomeRequest(
                 + "stage, which is never dialled automatically — they did not ask to be called.")
         String referralPhone,
 
+        @Size(max = 2000)
+        @Schema(description = "What this lead said about the person they named: what they are "
+                + "looking for, and how they know them. It becomes the referral's opening "
+                + "context, so their call does not start cold.")
+        String referralSummary,
+
         // --- what was actually said ---
 
         @Valid

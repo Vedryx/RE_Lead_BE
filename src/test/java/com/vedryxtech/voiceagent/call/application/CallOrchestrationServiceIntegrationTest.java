@@ -103,6 +103,62 @@ class CallOrchestrationServiceIntegrationTest {
         return sessions.get(0).callLog().getIdAsString();
     }
 
+    @Test
+    @DisplayName("A referral is created through the leads API, not a hand-built document")
+    void referral_goes_in_through_the_lead_service() {
+        Lead referrer = insertLead("P");
+        String callLogId = claimOneCallLogId();
+
+        orchestration.recordOutcome(callLogId, referralFrom(
+                "Sunil", "9822889401", "Friend of Dev; looking for a 2 BHK."));
+
+        Lead referred = leadRepository.findByCallingPhone("+919822889401").orElseThrow();
+        assertThat(referred.getStage()).isEqualTo(LeadStage.REFERRAL);
+        assertThat(referred.getSource()).isEqualTo("referral");
+        assertThat(referred.getReferredByLeadId()).isEqualTo(referrer.getId());
+        assertThat(referred.getReferralSummary())
+                .isEqualTo("Friend of Dev; looking for a 2 BHK.");
+        assertThat(referred.getProject()).isEqualTo(referrer.getProject());
+    }
+
+    @Test
+    @DisplayName("A referral is never queued for the dialler — they did not ask to be called")
+    void referral_is_not_dialable() {
+        insertLead("P");
+        String callLogId = claimOneCallLogId();
+
+        orchestration.recordOutcome(callLogId, referralFrom(
+                "Sunil", "9822889401", "Friend of Dev."));
+
+        Lead referred = leadRepository.findByCallingPhone("+919822889401").orElseThrow();
+        // The whole point of the stage gate. applyDefaults hands every NEW lead a slot;
+        // without the stage check this one would be cold-called on the next poll.
+        assertThat(referred.getNextAttemptAt()).isNull();
+        assertThat(referred.getStage().isAgentCallable()).isFalse();
+    }
+
+    @Test
+    @DisplayName("A referral with no summary still records who vouched for them")
+    void referral_without_a_summary_falls_back_to_the_referrer() {
+        insertLead("P");
+        String callLogId = claimOneCallLogId();
+
+        orchestration.recordOutcome(callLogId, referralFrom("Sunil", "9822889401", null));
+
+        Lead referred = leadRepository.findByCallingPhone("+919822889401").orElseThrow();
+        assertThat(referred.getReferralSummary()).contains("gave us this name");
+    }
+
+    private CallOutcomeRequest referralFrom(String name, String phone, String summary) {
+        return new CallOutcomeRequest(
+                CallOutcome.ANSWERED, CallDisposition.REFERRAL_GIVEN,
+                null, 5, 100, "Not for him", null,
+                null, null, null,
+                null, null, null, null, null, null,
+                null, name,
+                phone, summary, null, null);
+    }
+
     private CallOutcomeRequest answeredWithSiteVisit(OffsetDateTime siteVisitAt) {
         return new CallOutcomeRequest(
                 CallOutcome.ANSWERED, CallDisposition.SITE_VISIT_BOOKED,
@@ -110,7 +166,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, siteVisitAt, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     private CallOutcomeRequest noAnswer() {
@@ -119,7 +175,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     private CallOutcomeRequest answered(CallDisposition disposition) {
@@ -128,7 +184,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     private CallOutcomeRequest cancelled() {
@@ -137,7 +193,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     private CallOutcomeRequest invalidNumber() {
@@ -146,7 +202,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     // ============================================================ BLK-3 (staleness)

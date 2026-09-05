@@ -81,6 +81,7 @@ public interface LeadMapper {
 
     @Mapping(target = "id", source = "idAsString")
     @Mapping(target = "lastCallLogId", source = "lastCallLogId", qualifiedByName = "objectIdToString")
+    @Mapping(target = "referredBy", source = "referredByLeadId", qualifiedByName = "objectIdToString")
     LeadResponse toResponse(Lead lead);
 
     default void applyFullUpdate(Lead lead, LeadRequest request) {

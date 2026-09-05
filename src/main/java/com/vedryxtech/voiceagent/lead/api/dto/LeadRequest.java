@@ -58,6 +58,27 @@ public record LeadRequest(
 
         OffsetDateTime createdAt,
 
+        // ------------------------------------------------ a name someone else gave us
+
+        @Schema(description = "True when this name came from another lead rather than an "
+                + "enquiry. The lead is created in the referral stage and is never dialled "
+                + "automatically, because this person never asked to be called.",
+                example = "false")
+        Boolean referral,
+
+        @Pattern(regexp = "^[a-fA-F0-9]{24}$", message = "referredBy must be a lead id")
+        @Schema(description = "The lead who gave us this name. Required when referral is true.",
+                example = "6a9bc50109d81ae2069946a2")
+        String referredBy,
+
+        @Size(max = 2000)
+        @Schema(description = "What the referrer said about them on their own call: what this "
+                + "person is looking for, and who is vouching. The agent opens with this "
+                + "instead of a cold introduction.",
+                example = "Dev Saini's friend; looking for a 2 BHK, Dev gave the number after "
+                        + "deciding the project was not for him.")
+        String referralSummary,
+
         // ------------------------------------------------ filled in after the call
 
         @Schema(description = "What was agreed on the call. Leave empty for a fresh lead.",
