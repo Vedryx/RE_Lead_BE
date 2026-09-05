@@ -8,6 +8,8 @@ import com.vedryxtech.voiceagent.call.domain.CallEvent;
 import com.vedryxtech.voiceagent.call.domain.CallEventType;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
 import com.vedryxtech.voiceagent.settings.domain.CallPolicy;
+import com.vedryxtech.voiceagent.lead.api.dto.LeadRequest;
+import com.vedryxtech.voiceagent.lead.application.LeadService;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.lead.domain.LeadFinalStatus;
@@ -97,6 +99,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private final CurrentActor currentActor;
     private final CallArtifactService artifacts;
     private final WhatsAppNotificationService whatsAppNotificationService;
+    private final LeadService leadService;
 
     public CallOrchestrationServiceImpl(LeadRepository leadRepository,
                                         LeadCallLogRepository callLogRepository,
@@ -105,7 +108,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                                         CallPolicyProperties dialerProperties,
                                         CurrentActor currentActor,
                                         CallArtifactService artifacts,
-                                        WhatsAppNotificationService whatsAppNotificationService) {
+                                        WhatsAppNotificationService whatsAppNotificationService,
+                                        LeadService leadService) {
         this.leadRepository = leadRepository;
         this.callLogRepository = callLogRepository;
         this.settingsService = settingsService;
@@ -114,6 +118,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         this.currentActor = currentActor;
         this.artifacts = artifacts;
         this.whatsAppNotificationService = whatsAppNotificationService;
+        this.leadService = leadService;
     }
 
     // ------------------------------------------------------------------ claim
@@ -303,31 +308,57 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                         referrer.getIdAsString());
                 return;
             }
-            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-            Lead referred = new Lead();
-            referred.setName(name.trim());
-            referred.setPhone(normalised);
-            referred.setCallingPhone(normalised);
-            referred.setProject(referrer.getProject());
-            referred.setSource("referral");
-            referred.setStage(LeadStage.REFERRAL);
-            referred.setPipelineStatus(LeadPipelineStatus.NEW);
-            referred.setReferredByLeadId(referrer.getId());
-            referred.setAttemptCount(0);
-            referred.setConnectedCount(0);
-            referred.setTotalTalkSeconds(0);
-            referred.setDoNotCall(Boolean.FALSE);
-            // No next attempt: this lead is not the agent's to dial.
-            referred.setNextAttemptAt(null);
-            referred.setCreatedAt(now);
-            referred.setUpdatedAt(now);
-            leadRepository.save(referred);
-            log.info("Captured referral {} from lead {}", referred.getIdAsString(),
+            // The same request the leads API takes, through the same service. A referral is
+            // a lead like any other, so it goes in by the one door where validation,
+            // normalisation and the duplicate check live — not by a second hand-built one
+            // that has to remember all three.
+            LeadRequest referred = new LeadRequest(
+                    name.trim(),
+                    normalised,
+                    referrer.getProject(),
+                    "referral",
+                    referrer.getCampaign(),
+                    referrer.getAssignedTo(),
+                    null,
+                    Boolean.TRUE,
+                    referrer.getIdAsString(),
+                    referralSummaryFor(referrer, request),
+                    null, null, null, null, null, null, null, null, null, null, null);
+            Lead saved = leadService.create(referred);
+            log.info("Captured referral {} from lead {}", saved.getIdAsString(),
                     referrer.getIdAsString());
         } catch (RuntimeException ex) {
             log.error("Could not capture the referral from lead {}: {}",
                     referrer.getIdAsString(), ex.getMessage());
         }
+    }
+
+    /**
+     * What the referral's own call should open with.
+     *
+     * <p>Prefers what the agent wrote down during the call it was given on. Falling back to a
+     * bare sentence is deliberate: a referral with no context is still worth more than none,
+     * and the agent can ask rather than assume.</p>
+     */
+    private String referralSummaryFor(Lead referrer, CallOutcomeRequest request) {
+        String written = request.referralSummary();
+        if (written != null && !written.isBlank()) {
+            return written.trim();
+        }
+        String who = referrer.getName() == null || referrer.getName().isBlank()
+                ? "another lead"
+                : referrer.getName().trim();
+        return who + " gave us this name on their own call.";
+    }
+
+    /** The name of whoever gave us this lead, when it was a referral. */
+    private String referrerName(Lead lead) {
+        if (lead.getReferredByLeadId() == null) {
+            return null;
+        }
+        return leadRepository.findById(lead.getReferredByLeadId())
+                .map(Lead::getName)
+                .orElse(null);
     }
 
     private CallContext contextFor(Lead lead, LeadCallLog current) {
@@ -353,6 +384,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 lead.getCallbackAt(),
                 lead.getQuery(),
                 lead.getWhatsappPhone(),
+                lead.getReferralSummary(),
+                referrerName(lead),
                 previousAttempts,
                 orZero(lead.getConnectedCount()),
                 priors);

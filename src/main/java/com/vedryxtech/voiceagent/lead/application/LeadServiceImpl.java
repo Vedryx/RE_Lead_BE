@@ -12,6 +12,8 @@ import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.lead.mapper.LeadMapper;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
+import com.vedryxtech.voiceagent.exception.ValidationException;
+import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
@@ -57,6 +59,7 @@ public class LeadServiceImpl implements LeadService {
     @Override
     public Lead create(LeadRequest request) {
         Lead lead = mapper.toEntity(request);
+        applyReferral(lead, request);
         applyDefaults(lead);
         validate(lead);
 
@@ -193,6 +196,34 @@ public class LeadServiceImpl implements LeadService {
     // ----------------------------------------------------------------- helpers
 
     /** Fills in everything the agent may legitimately omit. */
+    /**
+     * Turn the three referral fields on the request into the stage and provenance a referral
+     * carries.
+     *
+     * <p>The caller says only that this is a referral and who gave it. Everything that decides
+     * how the lead is treated — the stage, the source, and the absence of a next attempt — is
+     * set here, so no caller can talk the dialler into ringing a stranger.</p>
+     */
+    private void applyReferral(Lead lead, LeadRequest request) {
+        if (!Boolean.TRUE.equals(request.referral())) {
+            return;
+        }
+        if (request.referredBy() == null || request.referredBy().isBlank()) {
+            throw new ValidationException("Referral validation failed",
+                    Map.of("referredBy", "is required when referral is true"));
+        }
+        ObjectId referrer = new ObjectId(request.referredBy());
+        if (!repository.existsById(referrer)) {
+            throw new ValidationException("Referral validation failed",
+                    Map.of("referredBy", "does not name a lead we know"));
+        }
+        lead.setReferredByLeadId(referrer);
+        lead.setStage(LeadStage.REFERRAL);
+        if (lead.getSource() == null || lead.getSource().isBlank()) {
+            lead.setSource("referral");
+        }
+    }
+
     private void applyDefaults(Lead lead) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
@@ -211,7 +242,12 @@ public class LeadServiceImpl implements LeadService {
             lead.setPipelineStatus(LeadPipelineStatus.NEW);
         }
         // A brand new lead is immediately claimable; an in-flight one keeps its own schedule.
-        if (lead.getNextAttemptAt() == null && lead.getPipelineStatus() == LeadPipelineStatus.NEW) {
+        // Only a lead the agent is allowed to dial gets a slot in the queue. A referral is
+        // NEW and otherwise looks perfectly claimable, so without the stage check it would be
+        // cold-called the moment the poller next ran.
+        if (lead.getNextAttemptAt() == null
+                && lead.getPipelineStatus() == LeadPipelineStatus.NEW
+                && (lead.getStage() == null || lead.getStage().isAgentCallable())) {
             lead.setNextAttemptAt(now);
         }
         if (lead.getAttemptCount() == null) {
