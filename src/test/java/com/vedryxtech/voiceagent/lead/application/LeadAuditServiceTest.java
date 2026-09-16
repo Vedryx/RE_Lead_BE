@@ -1,5 +1,7 @@
 package com.vedryxtech.voiceagent.lead.application;
 
+import com.vedryxtech.voiceagent.common.crypto.CryptoProperties;
+import com.vedryxtech.voiceagent.common.crypto.PhoneCipher;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.lead.domain.LeadAuditEntry;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
@@ -37,7 +39,7 @@ class LeadAuditServiceTest {
         CurrentActor actor = mock(CurrentActor.class);
         when(actor.actor()).thenReturn("user-42");
         when(actor.email()).thenReturn(java.util.Optional.of("priya@example.com"));
-        service = new LeadAuditService(repository, actor);
+        service = new LeadAuditService(repository, actor, new PhoneCipher(new CryptoProperties()));
     }
 
     @Test

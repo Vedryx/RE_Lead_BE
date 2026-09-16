@@ -47,6 +47,18 @@ server:
     include-message: always
 
 app:
+  # Phone numbers are encrypted at rest. Deterministic AES-256-GCM, so the unique
+  # index on calling_phone and every ?phone= lookup keep working without decrypting
+  # the collection. Blank leaves them in plaintext, which is what an un-migrated
+  # database needs. PHONE_ENC_KEY overrides this per environment.
+  #
+  # Losing this key makes every stored number unreadable — there is no recovery
+  # path, so it belongs wherever the database backups are kept too. Rotating it
+  # means re-encrypting every document, not just changing the value here.
+  # Generate one with:  openssl rand -base64 32
+  crypto:
+    phone-key: ${PHONE_ENC_KEY:oCpKoUbnndZ/LS8FDjfDJvs0QZ8BV+xNkxFzyRhyth8=}
+
   security:
     # Local HS256 secret. Must remain at least 32 characters long.
     jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g

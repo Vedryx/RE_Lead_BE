@@ -3,11 +3,13 @@ package com.vedryxtech.voiceagent.config;
 import com.vedryxtech.voiceagent.common.domain.WireValue;
 import com.vedryxtech.voiceagent.common.domain.WireValues;
 import com.vedryxtech.voiceagent.user.domain.UserRole;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.core.convert.converter.ConverterFactory;
+import org.springframework.data.convert.PropertyValueConverterFactory;
 import org.springframework.data.convert.ReadingConverter;
 import org.springframework.data.convert.WritingConverter;
 import org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper;
@@ -30,16 +32,22 @@ import java.util.List;
 public class MongoConfig {
 
     @Bean
-    public MongoCustomConversions mongoCustomConversions() {
-        return new MongoCustomConversions(List.of(
-                OffsetDateTimeToDateConverter.INSTANCE,
-                DateToOffsetDateTimeConverter.INSTANCE,
-                WireValueToStringConverter.INSTANCE,
-                // Registered explicitly so legacy role names (orgAdmin, manager, ...) still
-                // deserialise on read into the collapsed ADMIN/MEMBER pair. Without this, the
-                // generic WireValue factory below throws on any docs written before the rework.
-                StringToUserRoleConverter.INSTANCE,
-                new StringToWireValueConverterFactory()));
+    public MongoCustomConversions mongoCustomConversions(BeanFactory beanFactory) {
+        return MongoCustomConversions.create(adapter -> adapter
+                .registerConverters(List.of(
+                        OffsetDateTimeToDateConverter.INSTANCE,
+                        DateToOffsetDateTimeConverter.INSTANCE,
+                        WireValueToStringConverter.INSTANCE,
+                        // Registered explicitly so legacy role names (orgAdmin, manager, ...) still
+                        // deserialise on read into the collapsed ADMIN/MEMBER pair. Without this, the
+                        // generic WireValue factory below throws on any docs written before the rework.
+                        StringToUserRoleConverter.INSTANCE))
+                .registerConverterFactory(new StringToWireValueConverterFactory())
+                // @ValueConverter classes come from the context, not from a no-arg
+                // constructor: EncryptedPhoneConverter needs the cipher, and the cipher
+                // needs the key.
+                .registerPropertyValueConverterFactory(
+                        PropertyValueConverterFactory.beanFactoryAware(beanFactory)));
     }
 
     /**
