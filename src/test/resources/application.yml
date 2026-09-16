@@ -12,6 +12,10 @@ spring:
       auto-index-creation: true
 
 app:
+  # A throwaway key, so the tests run with phone encryption on exactly as prod does.
+  crypto:
+    phone-key: dGVzdC1vbmx5LXBob25lLWtleS0zMi1ieXRlcyEhISE=
+
   security:
     jwt-secret: KBvFNTp0rKuHqtEt39YZFHsKD9xDPEIflx3ujGH6SsazJLAPOGVT2q8g
     issuer: vedryxtech-voice-agent

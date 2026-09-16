@@ -9,6 +9,7 @@ import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import com.vedryxtech.voiceagent.lead.domain.LeadStatus;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
+import com.vedryxtech.voiceagent.common.crypto.CryptoProperties;
 import com.vedryxtech.voiceagent.user.domain.UserRole;
 import com.vedryxtech.voiceagent.storage.ObjectStorageProperties;
 import com.vedryxtech.voiceagent.dispatch.DispatchProperties;
@@ -27,7 +28,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 @EnableConfigurationProperties({CallPolicyProperties.class, ObjectStorageProperties.class,
         LiveKitProperties.class, WhatsAppProperties.class,
-        DispatchProperties.class})
+        DispatchProperties.class, CryptoProperties.class})
 public class WebConfig implements WebMvcConfigurer {
 
     @Override

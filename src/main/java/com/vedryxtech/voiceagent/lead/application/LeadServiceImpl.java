@@ -11,6 +11,7 @@ import com.vedryxtech.voiceagent.exception.InvalidLeadPayloadException;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.lead.mapper.LeadMapper;
 import com.vedryxtech.voiceagent.lead.persistence.LeadRepository;
+import com.vedryxtech.voiceagent.common.crypto.PhoneCipher;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import com.vedryxtech.voiceagent.exception.ValidationException;
 import com.vedryxtech.voiceagent.lead.domain.LeadStage;
@@ -45,13 +46,15 @@ public class LeadServiceImpl implements LeadService {
     private final MongoTemplate mongoTemplate;
     private final LeadMapper mapper;
     private final LeadAuditService audit;
+    private final PhoneCipher phoneCipher;
 
     public LeadServiceImpl(LeadRepository repository, MongoTemplate mongoTemplate, LeadMapper mapper,
-                           LeadAuditService audit) {
+                           LeadAuditService audit, PhoneCipher phoneCipher) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
         this.mapper = mapper;
         this.audit = audit;
+        this.phoneCipher = phoneCipher;
     }
 
     // ------------------------------------------------------------------ create
@@ -129,11 +132,7 @@ public class LeadServiceImpl implements LeadService {
             filters.add(Criteria.where("last_disposition").is(criteria.disposition().getValue()));
         }
         if (hasText(criteria.phone())) {
-            String normalized = PhoneNumbers.normalize(criteria.phone());
-            filters.add(new Criteria().orOperator(
-                    Criteria.where("calling_phone").is(normalized),
-                    Criteria.where("phone").is(normalized),
-                    Criteria.where("whatsapp_phone").is(normalized)));
+            applyPhoneCriteria(filters, criteria.phone());
         }
         if (hasText(criteria.name())) {
             filters.add(Criteria.where("name").regex(Pattern.quote(criteria.name().trim()), "i"));
@@ -324,6 +323,21 @@ public class LeadServiceImpl implements LeadService {
                 }
             }
         }
+    }
+
+    /**
+     * Matches a number against all three phone fields.
+     *
+     * <p>These criteria name the stored fields directly, so they bypass
+     * {@code EncryptedPhoneConverter} and would compare plaintext against ciphertext.
+     * The term is encrypted here instead; the cipher is deterministic, so equality holds.
+     */
+    private void applyPhoneCriteria(List<Criteria> filters, String phone) {
+        String stored = phoneCipher.encrypt(PhoneNumbers.normalize(phone));
+        filters.add(new Criteria().orOperator(
+                Criteria.where("calling_phone").is(stored),
+                Criteria.where("phone").is(stored),
+                Criteria.where("whatsapp_phone").is(stored)));
     }
 
     /** Guards the per-tenant unique calling phone when an update moves a lead to another number. */

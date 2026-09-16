@@ -1,8 +1,10 @@
 package com.vedryxtech.voiceagent.call.domain;
 
+import com.vedryxtech.voiceagent.common.crypto.EncryptedPhoneConverter;
 import com.vedryxtech.voiceagent.lead.domain.LeadPipelineStatus;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.convert.ValueConverter;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -37,6 +39,7 @@ public class LeadCallLog {
     private ObjectId leadId;
 
     @Field("phone")
+    @ValueConverter(EncryptedPhoneConverter.class)
     private String phone;
 
     @Field("name")

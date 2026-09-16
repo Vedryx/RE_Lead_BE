@@ -2,9 +2,11 @@ package com.vedryxtech.voiceagent.lead.domain;
 
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
+import com.vedryxtech.voiceagent.common.crypto.EncryptedPhoneConverter;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
+import org.springframework.data.convert.ValueConverter;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -60,11 +62,13 @@ public class Lead {
     /** Number the lead was reached on. Kept in sync with {@link #callingPhone}. */
     @Indexed(name = "idx_phone")
     @Field("phone")
+    @ValueConverter(EncryptedPhoneConverter.class)
     private String phone;
 
     /** Business key: one lead per phone number. */
     @Indexed(name = "uk_calling_phone", unique = true)
     @Field("calling_phone")
+    @ValueConverter(EncryptedPhoneConverter.class)
     private String callingPhone;
 
     @Field("project")
@@ -183,6 +187,7 @@ public class Lead {
     private Boolean confirmedByLead;
 
     @Field("whatsapp_phone")
+    @ValueConverter(EncryptedPhoneConverter.class)
     private String whatsappPhone;
 
     /** What the lead asked about. Usually captured during the call. */

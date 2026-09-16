@@ -4,6 +4,7 @@ import com.vedryxtech.voiceagent.call.domain.LeadCallLog;
 import com.vedryxtech.voiceagent.call.domain.RecordingStatus;
 import com.vedryxtech.voiceagent.exception.ResourceNotFoundException;
 import com.vedryxtech.voiceagent.call.persistence.LeadCallLogRepository;
+import com.vedryxtech.voiceagent.common.crypto.PhoneCipher;
 import com.vedryxtech.voiceagent.common.util.PhoneNumbers;
 import org.bson.types.ObjectId;
 import org.springframework.data.domain.Page;
@@ -24,10 +25,13 @@ public class LeadCallLogServiceImpl implements LeadCallLogService {
 
     private final LeadCallLogRepository repository;
     private final MongoTemplate mongoTemplate;
+    private final PhoneCipher phoneCipher;
 
-    public LeadCallLogServiceImpl(LeadCallLogRepository repository, MongoTemplate mongoTemplate) {
+    public LeadCallLogServiceImpl(LeadCallLogRepository repository, MongoTemplate mongoTemplate,
+                                  PhoneCipher phoneCipher) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
+        this.phoneCipher = phoneCipher;
     }
 
     @Override
@@ -55,7 +59,9 @@ public class LeadCallLogServiceImpl implements LeadCallLogService {
             filters.add(Criteria.where("lead_id").is(new ObjectId(criteria.leadId().trim())));
         }
         if (hasText(criteria.phone())) {
-            filters.add(Criteria.where("phone").is(PhoneNumbers.normalize(criteria.phone())));
+            // A raw field name skips EncryptedPhoneConverter, so encrypt the term to match storage.
+            filters.add(Criteria.where("phone").is(
+                    phoneCipher.encrypt(PhoneNumbers.normalize(criteria.phone()))));
         }
         if (hasText(criteria.outcome())) {
             filters.add(Criteria.where("outcome").is(criteria.outcome().trim()));

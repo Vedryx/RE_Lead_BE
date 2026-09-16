@@ -1,5 +1,6 @@
 package com.vedryxtech.voiceagent.lead.application;
 
+import com.vedryxtech.voiceagent.common.crypto.PhoneCipher;
 import com.vedryxtech.voiceagent.lead.domain.Lead;
 import com.vedryxtech.voiceagent.lead.domain.LeadAuditEntry;
 import com.vedryxtech.voiceagent.lead.persistence.LeadAuditRepository;
@@ -17,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -39,12 +41,22 @@ public class LeadAuditService {
      */
     private static final Map<String, Function<Lead, Object>> AUDITED = auditedFields();
 
+    /**
+     * Audited fields holding a phone number. The lead encrypts these at rest, and a
+     * trail that copied them out in plaintext would undo that, so their before and
+     * after values are stored encrypted too and decrypted only when history is read.
+     */
+    private static final Set<String> PHONE_FIELDS = Set.of("phone", "callingPhone", "whatsappPhone");
+
     private final LeadAuditRepository repository;
     private final CurrentActor currentActor;
+    private final PhoneCipher phoneCipher;
 
-    public LeadAuditService(LeadAuditRepository repository, CurrentActor currentActor) {
+    public LeadAuditService(LeadAuditRepository repository, CurrentActor currentActor,
+                            PhoneCipher phoneCipher) {
         this.repository = repository;
         this.currentActor = currentActor;
+        this.phoneCipher = phoneCipher;
     }
 
     /** A snapshot to compare against once the write has been applied. */
@@ -75,19 +87,35 @@ public class LeadAuditService {
     }
 
     public Page<LeadAuditEntry> history(Lead lead, Pageable pageable) {
-        return repository.findByLeadIdOrderByAtDesc(lead.getId(), pageable);
+        return repository.findByLeadIdOrderByAtDesc(lead.getId(), pageable).map(this::decrypted);
     }
 
-    private static List<LeadAuditEntry.FieldChange> diff(Map<String, Object> before, Lead after) {
+    private List<LeadAuditEntry.FieldChange> diff(Map<String, Object> before, Lead after) {
         List<LeadAuditEntry.FieldChange> changes = new ArrayList<>();
         AUDITED.forEach((field, reader) -> {
             Object was = before.get(field);
             Object now = reader.apply(after);
             if (!Objects.equals(was, now)) {
-                changes.add(new LeadAuditEntry.FieldChange(field, text(was), text(now)));
+                changes.add(PHONE_FIELDS.contains(field)
+                        ? new LeadAuditEntry.FieldChange(field,
+                                phoneCipher.encrypt(text(was)), phoneCipher.encrypt(text(now)))
+                        : new LeadAuditEntry.FieldChange(field, text(was), text(now)));
             }
         });
         return changes;
+    }
+
+    private LeadAuditEntry decrypted(LeadAuditEntry entry) {
+        if (entry.getChanges() == null) {
+            return entry;
+        }
+        entry.setChanges(entry.getChanges().stream()
+                .map(change -> PHONE_FIELDS.contains(change.field())
+                        ? new LeadAuditEntry.FieldChange(change.field(),
+                                phoneCipher.decrypt(change.from()), phoneCipher.decrypt(change.to()))
+                        : change)
+                .toList());
+        return entry;
     }
 
     private static String text(Object value) {
