@@ -23,7 +23,8 @@ spring:
   data:
     mongodb:
       # Atlas MongoDB connection for the highRise_voice database.
-      uri: mongodb+srv://signup_db_user:8koQ37zT4rkclnHU@highrise.3mnzjys.mongodb.net/highRise_voice?retryWrites=true&w=majority&appName=highRise
+      # uri: mongodb+srv://signup_db_user:8koQ37zT4rkclnHU@highrise.3mnzjys.mongodb.net/highRise_voice?retryWrites=true&w=majority&appName=highRise
+      uri: mongodb://127.0.0.1:27017/highRise_local
       auto-index-creation: true
 
     web:
