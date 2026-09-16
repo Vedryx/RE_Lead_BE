@@ -93,8 +93,8 @@ app:
     poll-seconds: 15
     livekit-url: ${LIVEKIT_URL:wss://highrise-sn6i8vmc.livekit.cloud}
     agent-name: ${LIVEKIT_AGENT_NAME:the-real-estate}
-    outbound-trunk-id: ${LIVEKIT_OUTBOUND_TRUNK_ID:ST_y6eo5HFw3LLt}
-    caller-id: ${PLIVO_PHONE_NUMBER:+918031906513}
+    outbound-trunk-id: ${LIVEKIT_OUTBOUND_TRUNK_ID:ST_GLseRxeovrki}
+    caller-id: ${PLIVO_PHONE_NUMBER:+918031706564}
 
   # Verifying that an egress webhook really came from LiveKit. Same key and secret
   # the agent dials with; without them every webhook is refused.
