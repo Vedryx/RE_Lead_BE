@@ -212,7 +212,7 @@ call POST "/api/v1/calls/$CALL_LOG_ID/outcome" key '{
   "outcome":"answered","disposition":"interested","talkSeconds":42,
   "summary":"Smoke test outcome.",
   "transcript":[
-    {"role":"agent","text":"Namaste, main Kavita","atSeconds":0},
+    {"role":"agent","text":"Namaste, main Ketan","atSeconds":0},
     {"role":"lead","text":"haan boliye, card number 4111 1111 1111 1111","atSeconds":5}],
   "transcriptTurnCount":2}'
 check "outcome accepted" 200 "$STATUS" "$BODY"

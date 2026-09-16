@@ -35,7 +35,7 @@ public class LiveKitClient {
     private static final Logger log = LoggerFactory.getLogger(LiveKitClient.class);
 
     /** Every room this service creates. Anything else in the project is somebody else's. */
-    public static final String ROOM_PREFIX = "Kavita-";
+    public static final String ROOM_PREFIX = "Ketan-";
 
     private final LiveKitProperties credentials;
     private final DispatchProperties properties;
