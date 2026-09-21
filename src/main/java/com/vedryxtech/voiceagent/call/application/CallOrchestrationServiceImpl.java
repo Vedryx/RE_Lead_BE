@@ -85,6 +85,12 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             LeadStage.NEW.getValue(),
             LeadStage.FOLLOW_UP.getValue());
 
+    /** Every outcome except {@code answered}: a dial that never reached the lead. */
+    private static final List<String> UNANSWERED_OUTCOMES = Arrays.stream(CallOutcome.values())
+            .filter(outcome -> outcome != CallOutcome.ANSWERED)
+            .map(CallOutcome::getValue)
+            .toList();
+
     private static final List<String> CLAIMABLE = List.of(
             LeadPipelineStatus.NEW.getValue(),
             LeadPipelineStatus.QUEUED.getValue(),
@@ -125,6 +131,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     @Override
     public List<CallSession> claimNext(int limit) {
+        return claimNext(limit, true);
+    }
+
+    @Override
+    public List<CallSession> claimNext(int limit, boolean withinCallingWindow) {
         AppSettings settings = settingsService.current();
         CallPolicy policy = policyOf(settings);
 
@@ -133,15 +144,33 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
         // "Call now" first: a person is watching a button and expects the phone to ring,
         // and these bypass both the schedule and the stage gate on purpose.
+        //
+        // Not the calling window, though. Before the window stopped being an early
+        // return this was unreachable out of hours and nobody had to decide; once the
+        // claim kept running, a button pressed at two in the morning rang someone at
+        // two in the morning. An undialled attempt keeps until the window opens.
+        // A person pressed the button and is watching the phone. That is an override of
+        // the schedule, the stage gate and the window alike: refusing to dial out of
+        // hours left the row undialled until it went stale, and the lead was never rung.
         sessions.addAll(claimUndialledAttempts(batch, policy));
 
         for (int i = sessions.size(); i < batch; i++) {
-            Lead claimed = claimOne();
+            Lead claimed = claimOne(withinCallingWindow);
             if (claimed == null) {
                 break;
             }
-            if (attemptsToday(claimed, settings) >= policy.maxAttemptsPerDayOrDefault()) {
+            if (promiseHasGoneStale(claimed, now())) {
+                // We said we would ring at a time that has since passed by more than the
+                // grace period — the service was down, or nothing was listening. Dialling
+                // it now would ring someone at whatever hour we happened to come back.
+                releaseStalePromise(claimed, settings, policy);
+                continue;
+            }
+            if (!claimed.isNextAttemptLeadRequested()
+                    && unansweredDialsToday(claimed, settings) >= policy.maxAttemptsPerDayOrDefault()) {
                 // Over the daily cap: put it back with tomorrow's window instead of dialling.
+                // A time the lead asked for is exempt — the cap limits calls we start, never
+                // one we committed to out loud.
                 deferToNextWindow(claimed, settings, policy);
                 continue;
             }
@@ -156,14 +185,22 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
      * One atomic claim. {@code findAndModify} flips exactly one due lead to {@code dialing},
      * so two workers polling concurrently can never take the same lead.
      */
-    private Lead claimOne() {
+    private Lead claimOne(boolean withinCallingWindow) {
         Date now = Date.from(OffsetDateTime.now(ZoneOffset.UTC).toInstant());
 
-        Query query = Query.query(Criteria.where("do_not_call").ne(Boolean.TRUE)
-                        .and("stage").in(AGENT_CALLABLE_STAGES)
-                        .and("pipeline_status").in(CLAIMABLE)
-                        .and("project").nin(NO_PROJECT)
-                        .and("next_attempt_at").lte(now))
+        Criteria criteria = Criteria.where("do_not_call").ne(Boolean.TRUE)
+                .and("stage").in(AGENT_CALLABLE_STAGES)
+                .and("pipeline_status").in(CLAIMABLE)
+                .and("project").nin(NO_PROJECT)
+                .and("next_attempt_at").lte(now);
+
+        // Out of hours only one kind of lead may be dialled: one who named this time
+        // themselves and was told it back. Everything else waits for the window.
+        if (!withinCallingWindow) {
+            criteria = criteria.and("next_attempt_lead_requested").is(Boolean.TRUE);
+        }
+
+        Query query = Query.query(criteria)
                 .with(Sort.by(Sort.Direction.ASC, "next_attempt_at"));
 
         Update update = new Update()
@@ -319,11 +356,10 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                     "referral",
                     referrer.getCampaign(),
                     referrer.getAssignedTo(),
-                    null,
                     Boolean.TRUE,
                     referrer.getIdAsString(),
                     referralSummaryFor(referrer, request),
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null);
             Lead saved = leadService.create(referred);
             log.info("Captured referral {} from lead {}", saved.getIdAsString(),
                     referrer.getIdAsString());
@@ -448,7 +484,9 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                                     String idempotencyKey, String handledBy,
                                     Boolean recordingOverride, boolean dialStarting) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        int attemptNumber = lead.attemptCountOrZero() + 1;
+        // The row's own number, so two answered calls are attempt 1 and attempt 2 in the
+        // log even though neither spends the budget the lead is measured against.
+        int attemptNumber = (int) callLogRepository.countByLeadId(lead.getId()) + 1;
         boolean recordingEnabled = recordingOverride != null
                 ? recordingOverride
                 : policy.recordingEnabledOrDefault();
@@ -493,7 +531,8 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         if (!lead.isClosed()) {
             lead.setPipelineStatus(LeadPipelineStatus.DIALING);
         }
-        lead.setAttemptCount(attemptNumber);
+        // Deliberately not lead.setAttemptCount(attemptNumber): the budget counts dials
+        // that failed, not calls that happened. applyUnanswered spends it instead.
         lead.setLastAttemptAt(now);
         lead.setLastCallLogId(saved.getId());
         lead.setUpdatedAt(now);
@@ -602,6 +641,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             if (freezePipeline) {
                 lead.setLastOutcome(outcome);
                 lead.setLastAttemptAt(now);
+                if (!outcome.isConnected()) {
+                    // The counters still move on a closed lead, and the budget counts
+                    // failures wherever they happen — a reminder that rings out is one.
+                    lead.setAttemptCount(lead.attemptCountOrZero() + 1);
+                }
                 lead.setTotalTalkSeconds(orZero(lead.getTotalTalkSeconds()) + orZero(callLog.getTalkSeconds()));
                 if (outcome.isConnected()) {
                     if (callLog.getAnsweredAt() == null) callLog.setAnsweredAt(now);
@@ -814,7 +858,11 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 lead.setConfirmedByLead(Boolean.TRUE);
                 lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
                 lead.setFinalStatus(null);
-                lead.setNextAttemptAt(clampToWindow(request.requestedCallbackAt(), settings, policy));
+                // Unclamped on purpose. This is the time the lead said out loud and the
+                // agent repeated back; moving it into the calling window would make the
+                // call arrive at an hour nobody agreed to, after a promise was made.
+                // The flag is what lets the dialler place this one call out of hours.
+                scheduleNextAttempt(lead, request.requestedCallbackAt(), true);
                 callLog.setRetryScheduledFor(lead.getNextAttemptAt());
                 callLog.addEvent(CallEvent.of(CallEventType.CALLBACK_REQUESTED, "Callback booked")
                         .with("requested_at", request.requestedCallbackAt().toString())
@@ -892,11 +940,44 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 // Connected but unresolved: try again later, and this one does spend an attempt.
                     scheduleRetry(lead, callLog, CallOutcome.ANSWERED, settings, policy, now);
         }
+
+        sendDetailsIfAlsoAskedFor(lead, callLog, disposition, request);
+    }
+
+    /**
+     * Sends the brochure when the lead asked for it alongside something else.
+     *
+     * <p>A call carries one disposition. A lead who books a callback <em>and</em> asks for
+     * the details on WhatsApp only gets the callback recorded, so the send never ran — and
+     * the agent, which had asked for their number, told them it had gone. The agent now
+     * reports the request separately from whatever agreement won the slot.</p>
+     *
+     * <p>The two dispositions that already send are skipped, so nobody gets it twice.</p>
+     */
+    private void sendDetailsIfAlsoAskedFor(Lead lead, LeadCallLog callLog,
+                                           CallDisposition disposition,
+                                           CallOutcomeRequest request) {
+        if (!Boolean.TRUE.equals(request.detailsRequested())
+                || disposition == CallDisposition.DETAILS_REQUESTED
+                || disposition == CallDisposition.STAY_IN_TOUCH) {
+            return;
+        }
+        if (lead.getWhatsappPhone() == null) {
+            lead.setWhatsappPhone(lead.getCallingPhone());
+        }
+        callLog.addEvent(CallEvent.of(CallEventType.OUTCOME_RECORDED,
+                "Details also requested; brochure sent alongside " + disposition.getValue()));
+        // Best-effort, exactly as the DETAILS_REQUESTED branch: a failed send must never
+        // undo the agreement this call actually reached.
+        whatsAppNotificationService.sendProjectDetails(lead);
     }
 
     /** The unanswered path: retry with backoff, or give up once the budget is spent. */
     private void applyUnanswered(Lead lead, LeadCallLog callLog, CallOutcome outcome,
                                  AppSettings settings, CallPolicy policy, OffsetDateTime now) {
+        // This is where the budget is spent. A dial that never reached the lead costs
+        // one attempt; an answered call costs nothing, however it ended.
+        lead.setAttemptCount(lead.attemptCountOrZero() + 1);
         if (outcome.isPermanentFailure()) {
             // M-3: a permanent-failure outcome (invalidNumber) must move the stage to
             // DISCARDED, matching the WRONG_NUMBER *disposition* branch below. Otherwise
@@ -930,7 +1011,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                                AppSettings settings, CallPolicy policy, OffsetDateTime now) {
         int maxAttempts = policy.maxAttemptsOrDefault();
         if (lead.attemptCountOrZero() >= maxAttempts) {
-            lead.setNextAttemptAt(null);
+            scheduleNextAttempt(lead, null, false);
             advanceStage(lead, LeadStage.DISCARDED);
             LeadFinalStatus terminal = orZero(lead.getConnectedCount()) > 0
                     ? LeadFinalStatus.NO_DECISION
@@ -949,7 +1030,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
         lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
         lead.setFinalStatus(null);
-        lead.setNextAttemptAt(nextAttempt);
+        scheduleNextAttempt(lead, nextAttempt, false);
         callLog.setRetryScheduledFor(nextAttempt);
         callLog.addEvent(CallEvent.of(CallEventType.RETRY_SCHEDULED,
                         "Retry " + (lead.attemptCountOrZero() + 1) + " of " + maxAttempts)
@@ -971,7 +1052,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 now.plusMinutes(policy.backoffMinutesFor(CallOutcome.ANSWERED)), settings, policy);
         lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
         lead.setFinalStatus(null);
-        lead.setNextAttemptAt(parkedFor);
+        scheduleNextAttempt(lead, parkedFor, false);
         callLog.setRetryScheduledFor(parkedFor);
         callLog.addEvent(CallEvent.of(CallEventType.RETRY_SCHEDULED, reason)
                 .with("next_attempt_at", parkedFor.toString())
@@ -989,7 +1070,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
     private void close(Lead lead, LeadPipelineStatus pipelineStatus, LeadFinalStatus finalStatus) {
         lead.setPipelineStatus(pipelineStatus);
         lead.setFinalStatus(finalStatus);
-        lead.setNextAttemptAt(null);
+        scheduleNextAttempt(lead, null, false);
     }
 
     // -------------------------------------------------------------- reschedule
@@ -1007,17 +1088,23 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        OffsetDateTime scheduledAt = clampToWindow(request.requestedAt(), settings, policy);
+        // Honoured exactly, and flagged as asked-for. A person agreed this time with the
+        // customer; clamping it into the window moved a 9pm call to noon the next day and
+        // left the customer waiting by a phone that never rang.
+        OffsetDateTime scheduledAt = request.requestedAt();
 
         lead.setPipelineStatus(LeadPipelineStatus.CALLBACK_SCHEDULED);
         lead.setFinalStatus(null);
-        lead.setNextAttemptAt(scheduledAt);
+        scheduleNextAttempt(lead, scheduledAt, true);
         // A person using this endpoint is booking a call, not volunteering to make one.
         // Filing it as TEAM_CALLBACK would move the lead to CALLBACK_REQUESTED, which the
         // agent may not dial — and then nobody would call at the time just agreed.
         lead.setActionType(ActionType.FOLLOW_UP_CALL);
         lead.setScheduledFor(request.requestedAt());
-        advanceStage(lead, LeadStage.FOLLOW_UP);
+        // Set, not ratcheted. advanceTo refuses to lift a terminal stage, so booking a
+        // time on an exhausted or discarded lead returned 200 and then never rang: the
+        // claim filter excludes DISCARDED for ever. Booking a call reopens the lead.
+        lead.setStage(LeadStage.FOLLOW_UP);
         lead.setStatus(LeadStatus.RESCHEDULED);
         lead.setCallbackAt(request.requestedAt());
         lead.setUpdatedAt(now);
@@ -1122,9 +1209,32 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
 
     // ----------------------------------------------------------------- helpers
 
+    /** Where a retry lands when it falls past the close of the calling window. */
+    private static final LocalTime NEXT_DAY_RETRY_TIME = LocalTime.NOON;
+
     /**
-     * Pushes a time into the installation's calling window: before it, move to today's opening;
-     * after it, move to tomorrow's opening. Keeps the dialler inside legal calling hours.
+     * Records when the dialler may pick a lead up again, and whether the lead asked for
+     * that time themselves.
+     *
+     * <p>Only a time the lead named is allowed out of the calling window, so the flag is
+     * written on the same line as the time rather than left to a later setter that a new
+     * branch could forget.</p>
+     */
+    private void scheduleNextAttempt(Lead lead, OffsetDateTime at, boolean leadRequested) {
+        lead.setNextAttemptAt(at);
+        lead.setNextAttemptLeadRequested(at != null && leadRequested);
+    }
+
+    /**
+     * Pushes a time into the installation's calling window: before it, move to today's
+     * opening; after it, move to midday tomorrow. Keeps the dialler inside legal calling
+     * hours.
+     *
+     * <p>Midday rather than tomorrow's opening because everything deferred overnight
+     * would otherwise pile onto the same 9 AM minute and go out as one burst.</p>
+     *
+     * <p>A callback time the lead asked for never comes through here — see
+     * {@link Lead#isNextAttemptLeadRequested()}.</p>
      */
     private OffsetDateTime clampToWindow(OffsetDateTime candidate, AppSettings settings, CallPolicy policy) {
         ZoneId zone = zoneOf(settings);
@@ -1136,7 +1246,7 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
             return local.with(start).toOffsetDateTime();
         }
         if (local.toLocalTime().isAfter(end)) {
-            return local.plusDays(1).with(start).toOffsetDateTime();
+            return local.plusDays(1).with(NEXT_DAY_RETRY_TIME).toOffsetDateTime();
         }
         return candidate;
     }
@@ -1149,10 +1259,60 @@ public class CallOrchestrationServiceImpl implements CallOrchestrationService {
                 .with(policy.windowStart());
 
         lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
-        lead.setNextAttemptAt(tomorrow.toOffsetDateTime());
+        scheduleNextAttempt(lead, tomorrow.toOffsetDateTime(), false);
         lead.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         leadRepository.save(lead);
         log.debug("Lead {} hit the daily attempt cap; deferred to {}", lead.getIdAsString(), tomorrow);
+    }
+
+    /** How late a promised time may be before we stop treating it as a promise. */
+    private static final Duration PROMISE_GRACE = Duration.ofMinutes(30);
+
+    private static OffsetDateTime now() {
+        return OffsetDateTime.now(ZoneOffset.UTC);
+    }
+
+    /**
+     * True when this lead is due on a time they named and that time is long past.
+     *
+     * <p>Nothing expires a promise today, so a callback missed overnight stays due for
+     * ever and is dialled by the first poll after the service returns — at 3am, if that
+     * is when it returned.
+     */
+    private boolean promiseHasGoneStale(Lead lead, OffsetDateTime now) {
+        return lead.isNextAttemptLeadRequested()
+                && lead.getNextAttemptAt() != null
+                && lead.getNextAttemptAt().isBefore(now.minus(PROMISE_GRACE));
+    }
+
+    /** Put a stale promise back in the queue as an ordinary retry, inside the window. */
+    private void releaseStalePromise(Lead lead, AppSettings settings, CallPolicy policy) {
+        OffsetDateTime missed = lead.getNextAttemptAt();
+        OffsetDateTime nextAttempt = clampToWindow(now(), settings, policy);
+
+        lead.setPipelineStatus(LeadPipelineStatus.RETRY_SCHEDULED);
+        scheduleNextAttempt(lead, nextAttempt, false);
+        lead.setUpdatedAt(now());
+        leadRepository.save(lead);
+        log.warn("Lead {} missed the time it was promised ({}); re-queued for {}",
+                lead.getIdAsString(), missed, nextAttempt);
+    }
+
+    /**
+     * Dials today that never reached the lead.
+     *
+     * <p>The cap counts failures, not conversations: three answered calls used to
+     * exhaust a lead who was happy to keep talking, and one misconfigured dial could
+     * spend the day's budget without the phone ever ringing.
+     */
+    private long unansweredDialsToday(Lead lead, AppSettings settings) {
+        return callLogRepository.countByLeadIdAndDialStartedAtGreaterThanEqualAndOutcomeIn(
+                lead.getId(), startOfToday(settings), UNANSWERED_OUTCOMES);
+    }
+
+    private OffsetDateTime startOfToday(AppSettings settings) {
+        ZoneId zone = zoneOf(settings);
+        return now().atZoneSameInstant(zone).toLocalDate().atStartOfDay(zone).toOffsetDateTime();
     }
 
     private long attemptsToday(Lead lead, AppSettings settings) {

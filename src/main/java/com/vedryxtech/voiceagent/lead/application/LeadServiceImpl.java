@@ -74,8 +74,7 @@ public class LeadServiceImpl implements LeadService {
 
     @Override
     public UpsertResult upsert(LeadRequest request) {
-        String callingPhone = PhoneNumbers.normalize(
-                request.callingPhone() != null ? request.callingPhone() : request.phone());
+        String callingPhone = PhoneNumbers.normalize(request.phone());
 
         Optional<Lead> existing = repository.findByCallingPhone(callingPhone);
         if (existing.isEmpty()) {
@@ -291,7 +290,7 @@ public class LeadServiceImpl implements LeadService {
      */
     private void validate(Lead lead) {
         if (!hasText(lead.getCallingPhone())) {
-            throw new InvalidLeadPayloadException("phone (or callingPhone) is required");
+            throw new InvalidLeadPayloadException("phone is required");
         }
 
         ActionType actionType = lead.getActionType();

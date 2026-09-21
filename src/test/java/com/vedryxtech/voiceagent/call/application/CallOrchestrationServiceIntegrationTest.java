@@ -1,6 +1,7 @@
 package com.vedryxtech.voiceagent.call.application;
 
 import com.vedryxtech.voiceagent.call.api.dto.CallOutcomeRequest;
+import com.vedryxtech.voiceagent.call.api.dto.RescheduleRequest;
 import com.vedryxtech.voiceagent.call.api.dto.StartCallRequest;
 import com.vedryxtech.voiceagent.call.domain.CallDisposition;
 import com.vedryxtech.voiceagent.call.domain.CallOutcome;
@@ -103,6 +104,107 @@ class CallOrchestrationServiceIntegrationTest {
         return sessions.get(0).callLog().getIdAsString();
     }
 
+    private CallOutcomeRequest callbackAt(OffsetDateTime requestedAt) {
+        return new CallOutcomeRequest(
+                CallOutcome.ANSWERED, CallDisposition.CALLBACK_REQUESTED,
+                ActionType.FOLLOW_UP_CALL, 5, 60, "Asked to be rung back", null,
+                requestedAt, null, null,
+                null, null, null, null, null, null,
+                null, null,
+                null, null, null, null, null);
+    }
+
+    @Test
+    @DisplayName("A callback time the lead asked for is kept exactly, even out of hours")
+    void a_lead_requested_time_is_never_pushed_into_the_calling_window() {
+        // The agent says the time back on the call. Clamping it to the window here is
+        // how a promise of "nau baje" turned into a call at nine the next morning.
+        insertLead("P");
+        String callLogId = claimOneCallLogId();
+        OffsetDateTime nineTonight = OffsetDateTime.now(ZoneOffset.UTC)
+                .plusDays(1)
+                .withHour(15).withMinute(30).withSecond(0).withNano(0);   // 21:00 IST
+
+        orchestration.recordOutcome(callLogId, callbackAt(nineTonight));
+
+        Lead lead = leadRepository.findAll().get(0);
+        assertThat(lead.getNextAttemptAt()).isEqualTo(nineTonight);
+        assertThat(lead.isNextAttemptLeadRequested()).isTrue();
+    }
+
+    @Test
+    @DisplayName("A brochure asked for alongside a callback is still sent")
+    void details_requested_with_a_callback_still_reaches_the_lead() {
+        // Live call: the lead asked for a callback and the brochure on WhatsApp. One
+        // disposition fits on a call, the callback took it, and the details request was
+        // dropped — while the agent told him it had been sent.
+        insertLead("P");
+        String callLogId = claimOneCallLogId();
+        OffsetDateTime tomorrow = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
+
+        orchestration.recordOutcome(callLogId, new CallOutcomeRequest(
+                CallOutcome.ANSWERED, CallDisposition.CALLBACK_REQUESTED,
+                ActionType.FOLLOW_UP_CALL, 5, 60, "Callback and the brochure", null,
+                tomorrow, null, null,
+                null, null, null, null, null, null,
+                null, null,
+                null, null, null, null, Boolean.TRUE));
+
+        LeadCallLog log = callLogRepository.findById(new org.bson.types.ObjectId(callLogId))
+                .orElseThrow();
+        assertThat(log.getEvents()).anyMatch(e ->
+                e.getMessage() != null && e.getMessage().startsWith("Details also requested"));
+        // The callback it agreed to is untouched by the send.
+        Lead lead = leadRepository.findAll().get(0);
+        assertThat(lead.getPipelineStatus()).isEqualTo(LeadPipelineStatus.CALLBACK_SCHEDULED);
+        assertThat(lead.getWhatsappPhone()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("A 'call now' attempt is dialled out of hours, because a person asked for it")
+    void a_call_now_attempt_is_dialled_out_of_hours() {
+        // It bypasses the schedule, the stage gate and the hours: somebody pressed the
+        // button and is watching the phone. Holding it back until the window opened left
+        // the row undialled until it went stale, and the lead was never rung at all.
+        Lead lead = insertLead("P");
+        orchestration.startCall(lead.getIdAsString(), new StartCallRequest(
+                "call-now-out-of-hours", "agent", Boolean.FALSE));
+
+        assertThat(orchestration.claimNext(5, false)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Opening a 'call now' attempt spends none of the lead's budget")
+    void a_call_now_attempt_does_not_spend_an_attempt() {
+        Lead lead = insertLead("P");
+        orchestration.startCall(lead.getIdAsString(), new StartCallRequest(
+                "call-now-budget", "agent", Boolean.FALSE));
+
+        assertThat(leadRepository.findById(lead.getId()).orElseThrow().attemptCountOrZero())
+                .as("the budget counts dials that failed, not attempts that were opened")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("Out of hours, only a lead-requested time is claimed")
+    void a_closed_window_hands_out_only_the_leads_who_asked_for_this_hour() {
+        OffsetDateTime due = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5);
+
+        Lead asked = insertLead("P");
+        asked.setNextAttemptAt(due);
+        asked.setNextAttemptLeadRequested(Boolean.TRUE);
+        leadRepository.save(asked);
+
+        Lead routine = insertLead("P");   // its own random number, flag left unset
+        routine.setNextAttemptAt(due);
+        leadRepository.save(routine);
+
+        List<CallOrchestrationService.CallSession> claimed = orchestration.claimNext(5, false);
+
+        assertThat(claimed).hasSize(1);
+        assertThat(claimed.get(0).lead().getIdAsString()).isEqualTo(asked.getIdAsString());
+    }
+
     @Test
     @DisplayName("A referral is created through the leads API, not a hand-built document")
     void referral_goes_in_through_the_lead_service() {
@@ -156,7 +258,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, name,
-                phone, summary, null, null);
+                phone, summary, null, null, null);
     }
 
     private CallOutcomeRequest answeredWithSiteVisit(OffsetDateTime siteVisitAt) {
@@ -166,7 +268,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, siteVisitAt, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private CallOutcomeRequest noAnswer() {
@@ -175,7 +277,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private CallOutcomeRequest answered(CallDisposition disposition) {
@@ -184,7 +286,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private CallOutcomeRequest cancelled() {
@@ -193,7 +295,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private CallOutcomeRequest invalidNumber() {
@@ -202,7 +304,7 @@ class CallOrchestrationServiceIntegrationTest {
                 null, null, null,
                 null, null, null, null, null, null,
                 null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     // ============================================================ BLK-3 (staleness)
@@ -286,7 +388,9 @@ class CallOrchestrationServiceIntegrationTest {
                 .as("pipelineStatus stays terminal")
                 .isEqualTo(LeadPipelineStatus.COMPLETED);
         assertThat(reloaded.getStage()).isEqualTo(LeadStage.SITE_VISIT);
-        assertThat(reloaded.getAttemptCount()).isEqualTo(2);
+        // The booked visit was an answered call and cost nothing; only the reminder that
+        // rang out spends from the budget.
+        assertThat(reloaded.getAttemptCount()).isEqualTo(1);
 
         LeadCallLog reminderClosed = callLogRepository.findById(reminderLog.getId()).orElseThrow();
         assertThat(reminderClosed.getOutcome()).isEqualTo(CallOutcome.NO_ANSWER);
@@ -402,8 +506,8 @@ class CallOrchestrationServiceIntegrationTest {
     // ============================================================ MEDIUM regressions
 
     @Test
-    @DisplayName("M-1: three answered calls with no decision close as NO_DECISION, not UNREACHABLE")
-    void answered_but_never_decided_closes_as_no_decision() {
+    @DisplayName("M-1: a lead who keeps answering is never exhausted")
+    void answered_calls_do_not_spend_the_retry_budget() {
         // Trim maxAttempts to 3 so we hit exhaustion fast.
         AppSettings s = settingsService.current();
         s.getCallPolicy().setMaxAttempts(3);
@@ -428,13 +532,47 @@ class CallOrchestrationServiceIntegrationTest {
             orchestration.recordOutcome(cid, answered(CallDisposition.NO_DECISION));
         }
         Lead reloaded = leadRepository.findById(lead.getId()).orElseThrow();
+        // Three conversations, none of them a failure: the budget is untouched and the
+        // lead is still in play. The cap exists to stop us pestering someone who will not
+        // pick up, not to cut off someone who keeps talking to us.
+        assertThat(reloaded.attemptCountOrZero()).isZero();
+        assertThat(reloaded.getConnectedCount()).isEqualTo(3);
+        assertThat(reloaded.getPipelineStatus()).isEqualTo(LeadPipelineStatus.RETRY_SCHEDULED);
+        assertThat(reloaded.getStage()).isNotEqualTo(LeadStage.DISCARDED);
+        assertThat(reloaded.getFinalStatus()).isNull();
+    }
+
+    @Test
+    @DisplayName("M-1: unanswered dials still exhaust, and a lead who once spoke closes as NO_DECISION")
+    void unanswered_dials_exhaust_the_lead() {
+        AppSettings s = settingsService.current();
+        s.getCallPolicy().setMaxAttempts(3);
+        s.getCallPolicy().setMaxAttemptsPerDay(10);
+        s.getCallPolicy().setCallingWindowStart("00:00");
+        s.getCallPolicy().setCallingWindowEnd("23:59");
+        Map<String, Integer> quick = new LinkedHashMap<>();
+        for (String key : List.of("noAnswer", "busy", "rejected", "voicemail", "failed", "answered")) {
+            quick.put(key, 0);
+        }
+        s.getCallPolicy().setRetryBackoffMinutes(quick);
+        settingsService.save(s);
+
+        Lead lead = insertLead("P");
+        // One conversation, so the lead is known to be reachable...
+        orchestration.recordOutcome(claimOneCallLogId(), answered(CallDisposition.NO_DECISION));
+        // ...then three rings nobody picks up.
+        for (int i = 0; i < 3; i++) {
+            orchestration.recordOutcome(claimOneCallLogId(), noAnswer());
+        }
+
+        Lead reloaded = leadRepository.findById(lead.getId()).orElseThrow();
+        assertThat(reloaded.attemptCountOrZero()).isEqualTo(3);
+        assertThat(reloaded.getPipelineStatus()).isEqualTo(LeadPipelineStatus.EXHAUSTED);
+        assertThat(reloaded.getStage()).isEqualTo(LeadStage.DISCARDED);
         assertThat(reloaded.getFinalStatus())
                 .as("connectedCount %d > 0 must close as NO_DECISION, not UNREACHABLE",
                         reloaded.getConnectedCount())
                 .isEqualTo(LeadFinalStatus.NO_DECISION);
-        assertThat(reloaded.getConnectedCount()).isEqualTo(3);
-        assertThat(reloaded.getPipelineStatus()).isEqualTo(LeadPipelineStatus.EXHAUSTED);
-        assertThat(reloaded.getStage()).isEqualTo(LeadStage.DISCARDED);
     }
 
     @Test
@@ -659,5 +797,133 @@ class CallOrchestrationServiceIntegrationTest {
         // Every claim is distinct. No lead was handed out twice.
         assertThat(callLogIds).doesNotHaveDuplicates();
         assertThat(callLogIds.size()).isEqualTo(leads);
+    }
+
+    // ======================================= the promise rules
+
+    /** Puts the lead where the dialler will find it, with the flag under test. */
+    private void makeDue(Lead lead, OffsetDateTime when, boolean leadRequested) {
+        mongoTemplate.updateFirst(
+                new org.springframework.data.mongodb.core.query.Query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("_id").is(lead.getId())),
+                new org.springframework.data.mongodb.core.query.Update()
+                        .set("next_attempt_at", when)
+                        .set("next_attempt_lead_requested", leadRequested)
+                        .set("pipeline_status", LeadPipelineStatus.RETRY_SCHEDULED.getValue()),
+                Lead.class);
+    }
+
+    private void capAt(int perDay) {
+        AppSettings settings = settingsService.current();
+        settings.getCallPolicy().setMaxAttemptsPerDay(perDay);
+        settings.getCallPolicy().setCallingWindowStart("00:00");
+        settings.getCallPolicy().setCallingWindowEnd("23:59");
+        settingsService.save(settings);
+    }
+
+    @Test
+    @DisplayName("The daily cap never moves a time the lead asked for")
+    void a_lead_requested_time_is_exempt_from_the_daily_cap() {
+        capAt(1);
+        Lead lead = insertLead("P");
+        // Spend the day's allowance on a dial nobody picked up.
+        orchestration.recordOutcome(claimOneCallLogId(), noAnswer());
+
+        makeDue(lead, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1), true);
+
+        assertThat(orchestration.claimNext(1, true))
+                .as("the cap limits calls we start, never one we promised")
+                .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Without that promise, the cap still defers to tomorrow")
+    void an_ordinary_retry_still_hits_the_daily_cap() {
+        capAt(1);
+        Lead lead = insertLead("P");
+        orchestration.recordOutcome(claimOneCallLogId(), noAnswer());
+
+        makeDue(lead, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1), false);
+
+        assertThat(orchestration.claimNext(1, true)).isEmpty();
+        assertThat(leadRepository.findById(lead.getId()).orElseThrow().getPipelineStatus())
+                .isEqualTo(LeadPipelineStatus.RETRY_SCHEDULED);
+    }
+
+    @Test
+    @DisplayName("A promise missed by hours is re-queued, not rung at whatever hour we return")
+    void a_stale_promise_is_not_dialled_late() {
+        capAt(10);
+        Lead lead = insertLead("P");
+        OffsetDateTime missed = OffsetDateTime.now(ZoneOffset.UTC).minusHours(3);
+        makeDue(lead, missed, true);
+
+        assertThat(orchestration.claimNext(1, true))
+                .as("nothing is dialled on a promise this old")
+                .isEmpty();
+
+        Lead reloaded = leadRepository.findById(lead.getId()).orElseThrow();
+        assertThat(reloaded.getPipelineStatus()).isEqualTo(LeadPipelineStatus.RETRY_SCHEDULED);
+        assertThat(reloaded.isNextAttemptLeadRequested())
+                .as("it is an ordinary retry now, so it may not run out of hours")
+                .isFalse();
+        assertThat(reloaded.getNextAttemptAt()).isAfter(missed);
+    }
+
+    @Test
+    @DisplayName("A promise a few minutes late is still a promise")
+    void a_promise_inside_the_grace_period_is_dialled() {
+        capAt(10);
+        Lead lead = insertLead("P");
+        makeDue(lead, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5), true);
+
+        assertThat(orchestration.claimNext(1, true)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("A human's rescheduled time is stored exactly, and may run out of hours")
+    void a_rescheduled_time_is_honoured_as_asked_for() {
+        AppSettings settings = settingsService.current();
+        settings.getCallPolicy().setCallingWindowStart("10:00");
+        settings.getCallPolicy().setCallingWindowEnd("17:00");
+        settingsService.save(settings);
+
+        Lead lead = insertLead("P");
+        // 21:00 IST tomorrow — well outside the window a clamp used to move it into.
+        OffsetDateTime nineTonight = OffsetDateTime.now(ZoneOffset.UTC)
+                .plusDays(1).withHour(15).withMinute(30).withSecond(0).withNano(0);
+
+        orchestration.reschedule(lead.getIdAsString(), new RescheduleRequest(nineTonight, "customer asked"));
+
+        Lead reloaded = leadRepository.findById(lead.getId()).orElseThrow();
+        assertThat(reloaded.getNextAttemptAt()).isEqualTo(nineTonight);
+        assertThat(reloaded.isNextAttemptLeadRequested()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Rescheduling an exhausted lead puts it back in the queue")
+    void rescheduling_revives_a_dead_lead() {
+        capAt(10);
+        Lead lead = insertLead("P");
+        mongoTemplate.updateFirst(
+                new org.springframework.data.mongodb.core.query.Query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("_id").is(lead.getId())),
+                new org.springframework.data.mongodb.core.query.Update()
+                        .set("stage", LeadStage.DISCARDED.getValue())
+                        .set("pipeline_status", LeadPipelineStatus.EXHAUSTED.getValue())
+                        .set("final_status", LeadFinalStatus.UNREACHABLE.getValue()),
+                Lead.class);
+
+        orchestration.reschedule(lead.getIdAsString(), new RescheduleRequest(
+                OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1), "they called back"));
+
+        Lead reloaded = leadRepository.findById(lead.getId()).orElseThrow();
+        assertThat(reloaded.getStage())
+                .as("a booked call reopens the lead; a ratcheted stage left it unreachable")
+                .isEqualTo(LeadStage.FOLLOW_UP);
+        assertThat(reloaded.getFinalStatus()).isNull();
+        assertThat(orchestration.claimNext(1, true))
+                .as("and the dialler can actually see it")
+                .hasSize(1);
     }
 }

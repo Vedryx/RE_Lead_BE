@@ -120,6 +120,20 @@ public record CallOutcomeRequest(
         @Min(0)
         @Schema(description = "Turns before truncation. Larger than transcript.size() means "
                 + "the stored copy is trimmed.", example = "31")
-        Integer transcriptTurnCount
+        Integer transcriptTurnCount,
+
+        /**
+         * True when the lead asked for the brochure on WhatsApp, whatever else the call
+         * agreed.
+         *
+         * <p>A call carries one disposition, and a lead who asks for a callback <em>and</em>
+         * the details only gets the callback recorded — the request for details was silently
+         * dropped, and the agent told them it had been sent. This says so independently, so
+         * the send no longer depends on which agreement won the slot.</p>
+         */
+        @Schema(description = "The lead asked for the brochure on WhatsApp. Independent of "
+                + "disposition: a callback and a details request can both come out of one "
+                + "call, and only one of them fits in disposition.", example = "true")
+        Boolean detailsRequested
 ) {
 }

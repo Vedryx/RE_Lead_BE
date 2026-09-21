@@ -17,7 +17,12 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 public interface LeadMapper {
 
     @Mapping(target = "id", ignore = true)
+    // Both timestamps are the server's to set; the wire never carries them.
+    @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    // callingPhone is no longer a client field: it is the number actually dialled, and it
+    // follows phone so a corrected number cannot leave the dialler on the old one.
+    @Mapping(target = "callingPhone", source = "phone")
     @Mapping(target = "pipelineStatus", ignore = true)
     @Mapping(target = "finalStatus", ignore = true)
     @Mapping(target = "lastDisposition", ignore = true)
@@ -38,6 +43,8 @@ public interface LeadMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    // A replace that changes phone must move the dialled number with it.
+    @Mapping(target = "callingPhone", source = "phone")
     @Mapping(target = "pipelineStatus", ignore = true)
     @Mapping(target = "finalStatus", ignore = true)
     @Mapping(target = "lastDisposition", ignore = true)
@@ -58,6 +65,8 @@ public interface LeadMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    // Null phone is ignored, so this only fires when the patch actually corrects the number.
+    @Mapping(target = "callingPhone", source = "phone")
     @Mapping(target = "pipelineStatus", ignore = true)
     // Patchable on purpose: discarding a lead by hand has to record why, and a person
     // may correct a stage the agent got wrong. Null is ignored, so omitting either

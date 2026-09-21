@@ -78,9 +78,9 @@ public class OutboundDialScheduler {
     private void placeCalls() {
         CallPolicy policy = settings.current().getCallPolicy();
 
-        if (!withinCallingWindow(policy)) {
-            return;
-        }
+        // Not an early return any more. Outside the window the claim still runs, but it
+        // hands back only leads who asked to be rung at this hour themselves.
+        boolean windowOpen = withinCallingWindow(policy);
 
         // Deliberately not gated on dueCount. That counts leads in a claimable pipeline
         // status, and "Call now" moves a lead straight to DIALING — so a manual call
@@ -94,7 +94,7 @@ public class OutboundDialScheduler {
             return;
         }
 
-        List<CallOrchestrationService.CallSession> claimed = orchestration.claimNext(free);
+        List<CallOrchestrationService.CallSession> claimed = orchestration.claimNext(free, windowOpen);
         if (claimed.isEmpty()) {
             return;
         }
@@ -182,18 +182,23 @@ public class OutboundDialScheduler {
     }
 
     /**
-     * Nobody is rung outside the calling window.
+     * Whether the calling window is open right now.
      *
      * <p>The Python dialler never checked: it trusted {@code nextAttemptAt}, which is
      * clamped when a retry is scheduled but not when a lead is created. A lead added at
      * two in the morning was due immediately and would have been called.
+     *
+     * <p>Closed does not mean nobody is rung. A lead who said "call me at nine tonight"
+     * is dialled at nine tonight — the claim narrows to exactly those leads, because the
+     * alternative is promising a time on the call and ringing twelve hours later.
      */
     private boolean withinCallingWindow(CallPolicy policy) {
         LocalTime now = ZonedDateTime.now(IST).toLocalTime();
         LocalTime open = policy.windowStart();
         LocalTime close = policy.windowEnd();
         if (now.isBefore(open) || now.isAfter(close)) {
-            log.debug("Outside the calling window {}–{}; not dialling at {}", open, close, now);
+            log.debug("Outside the calling window {}–{} at {}; only lead-requested times "
+                    + "will be dialled", open, close, now);
             return false;
         }
         return true;

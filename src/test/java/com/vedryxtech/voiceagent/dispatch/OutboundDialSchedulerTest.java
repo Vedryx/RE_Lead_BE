@@ -18,7 +18,9 @@ import com.vedryxtech.voiceagent.lead.domain.ActionType;
 import com.vedryxtech.voiceagent.lead.domain.LeadStage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -64,7 +66,7 @@ class OutboundDialSchedulerTest {
 
     @Test
     void an_empty_queue_dials_nothing() {
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of());
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of());
 
         scheduler.dialWhatIsDue();
 
@@ -77,7 +79,7 @@ class OutboundDialSchedulerTest {
         // it meant a manual call created an attempt that nothing ever looked for.
         when(orchestration.dueCount()).thenReturn(0L);
         when(livekit.liveCallCount()).thenReturn(0);
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of(session("+919000000001")));
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of(session("+919000000001")));
 
         scheduler.dialWhatIsDue();
 
@@ -89,21 +91,21 @@ class OutboundDialSchedulerTest {
         // Ten due, two already in progress, ceiling of three: exactly one may be taken.
         // Claiming the other nine would strand them in dialing for fifteen minutes.
         when(livekit.liveCallCount()).thenReturn(2);
-        when(orchestration.claimNext(1)).thenReturn(List.of(session("+919000000001")));
+        when(orchestration.claimNext(eq(1), anyBoolean())).thenReturn(List.of(session("+919000000001")));
 
         scheduler.dialWhatIsDue();
 
-        verify(orchestration).claimNext(1);
+        verify(orchestration).claimNext(eq(1), anyBoolean());
     }
 
     @Test
     void it_asks_for_exactly_the_free_slots() {
         when(livekit.liveCallCount()).thenReturn(2);
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of());
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of());
 
         scheduler.dialWhatIsDue();
 
-        verify(orchestration).claimNext(1);
+        verify(orchestration).claimNext(eq(1), anyBoolean());
     }
 
     @Test
@@ -112,7 +114,7 @@ class OutboundDialSchedulerTest {
 
         scheduler.dialWhatIsDue();
 
-        verify(orchestration, never()).claimNext(anyInt());
+        verify(orchestration, never()).claimNext(anyInt(), anyBoolean());
     }
 
     @Test
@@ -120,7 +122,7 @@ class OutboundDialSchedulerTest {
         // Ringing into a room the agent has not joined is how a lead gets silence.
         when(orchestration.dueCount()).thenReturn(1L);
         when(livekit.liveCallCount()).thenReturn(0);
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of(session("+919000000001")));
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of(session("+919000000001")));
 
         scheduler.dialWhatIsDue();
 
@@ -133,7 +135,7 @@ class OutboundDialSchedulerTest {
     void one_lead_that_cannot_be_dialled_does_not_stop_the_batch() {
         when(orchestration.dueCount()).thenReturn(2L);
         when(livekit.liveCallCount()).thenReturn(0);
-        when(orchestration.claimNext(anyInt()))
+        when(orchestration.claimNext(anyInt(), anyBoolean()))
                 .thenReturn(List.of(session("+919000000001"), session("+919000000002")));
         org.mockito.Mockito.doThrow(new RuntimeException("trunk refused"))
                 .doNothing()
@@ -148,7 +150,7 @@ class OutboundDialSchedulerTest {
     void a_lead_with_no_number_is_skipped_rather_than_dialled() {
         when(orchestration.dueCount()).thenReturn(1L);
         when(livekit.liveCallCount()).thenReturn(0);
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of(session(null)));
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of(session(null)));
 
         scheduler.dialWhatIsDue();
 
@@ -156,9 +158,12 @@ class OutboundDialSchedulerTest {
     }
 
     @Test
-    void nobody_is_rung_outside_the_calling_window() {
+    void outside_the_calling_window_only_lead_requested_times_are_claimed() {
         // The Python dialler never checked this: it trusted nextAttemptAt, which is
         // clamped on retry but not on creation. A lead added at 2am was due at once.
+        // The claim still runs out of hours, but false narrows it to leads who named
+        // this hour themselves — otherwise a promised "call me at nine tonight" would
+        // arrive at nine the next morning.
         SettingsService settings = mock(SettingsService.class);
         AppSettings appSettings = new AppSettings();
         CallPolicy closed = CallPolicy.defaults();
@@ -171,7 +176,8 @@ class OutboundDialSchedulerTest {
 
         nightScheduler.dialWhatIsDue();
 
-        verify(orchestration, never()).claimNext(anyInt());
+        verify(orchestration).claimNext(anyInt(), eq(false));
+        verify(orchestration, never()).claimNext(anyInt(), eq(true));
     }
 
     @Test
@@ -230,7 +236,7 @@ class OutboundDialSchedulerTest {
         lead.setCallingPhone("+919000000001");
         LeadCallLog callLog = new LeadCallLog();
         callLog.setId(new ObjectId());
-        when(orchestration.claimNext(anyInt())).thenReturn(List.of(
+        when(orchestration.claimNext(anyInt(), anyBoolean())).thenReturn(List.of(
                 new CallOrchestrationService.CallSession(lead, callLog, true, context)));
 
         scheduler.dialWhatIsDue();

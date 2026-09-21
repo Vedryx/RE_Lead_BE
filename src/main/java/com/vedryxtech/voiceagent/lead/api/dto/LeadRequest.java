@@ -56,8 +56,6 @@ public record LeadRequest(
         @Size(max = 64)
         String assignedTo,
 
-        OffsetDateTime createdAt,
-
         // ------------------------------------------------ a name someone else gave us
 
         @Schema(description = "True when this name came from another lead rather than an "
@@ -85,7 +83,11 @@ public record LeadRequest(
                 example = "null")
         ActionType actionType,
 
-        @Schema(description = "Status of that agreed action. Leave empty for a fresh lead.")
+        @Schema(description = "Status of that agreed action, never of the lead itself. Null for a "
+                + "new lead: it is set only alongside actionType — requested for "
+                + "whatsappProjectDetails, scheduled for siteVisit and followUpCall.",
+                nullable = true,
+                example = "null")
         LeadStatus status,
 
         @Size(max = 2000)
@@ -106,10 +108,6 @@ public record LeadRequest(
         Boolean reminderEnabled,
 
         Boolean confirmedByLead,
-
-        @Pattern(regexp = "^[0-9+() -]{7,25}$",
-                message = "callingPhone must be 7-25 characters of digits, +, spaces, dashes or brackets")
-        String callingPhone,
 
         @Pattern(regexp = "^[0-9+() -]{7,25}$",
                 message = "whatsappPhone must be 7-25 characters of digits, +, spaces, dashes or brackets")
