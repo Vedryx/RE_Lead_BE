@@ -38,6 +38,15 @@ public interface CallOrchestrationService {
      */
     List<CallSession> claimNext(int limit);
 
+    /**
+     * The same claim, told whether the calling window is currently open.
+     *
+     * <p>With it closed the only leads handed out are those whose next attempt is a time
+     * the lead asked for in their own words. A caller that does not know about the window
+     * uses {@link #claimNext(int)} and is treated as being inside it.</p>
+     */
+    List<CallSession> claimNext(int limit, boolean withinCallingWindow);
+
     /** Opens an attempt for one specific lead, e.g. the dashboard's "call now" button. */
     CallSession startCall(String leadId, StartCallRequest request);
 

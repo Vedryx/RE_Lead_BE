@@ -130,6 +130,17 @@ public class Lead {
     @Field("next_attempt_at")
     private OffsetDateTime nextAttemptAt;
 
+    /**
+     * True when {@code nextAttemptAt} is a time the lead asked for in their own words.
+     *
+     * <p>Such a time is kept exactly as given and may be dialled outside the calling
+     * window: someone who says "call me at nine tonight" has invited the call, and
+     * ringing them at nine the next morning instead breaks a promise the agent made
+     * out loud. Every automatic retry leaves this false and stays inside the window.</p>
+     */
+    @Field("next_attempt_lead_requested")
+    private Boolean nextAttemptLeadRequested;
+
     @Field("total_talk_seconds")
     private Integer totalTalkSeconds = 0;
 
@@ -391,6 +402,19 @@ public class Lead {
 
     public void setNextAttemptAt(OffsetDateTime nextAttemptAt) {
         this.nextAttemptAt = nextAttemptAt;
+    }
+
+    public Boolean getNextAttemptLeadRequested() {
+        return nextAttemptLeadRequested;
+    }
+
+    public void setNextAttemptLeadRequested(Boolean nextAttemptLeadRequested) {
+        this.nextAttemptLeadRequested = nextAttemptLeadRequested;
+    }
+
+    /** Null on every lead written before the field existed, which means "not requested". */
+    public boolean isNextAttemptLeadRequested() {
+        return Boolean.TRUE.equals(nextAttemptLeadRequested);
     }
 
     public Integer getTotalTalkSeconds() {

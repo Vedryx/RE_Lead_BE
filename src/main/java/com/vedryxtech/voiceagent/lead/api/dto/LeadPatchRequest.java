@@ -39,9 +39,6 @@ public record LeadPatchRequest(
         @Pattern(regexp = "^[0-9+() -]{7,25}$", message = "phone must be 7-25 characters of digits, +, spaces, dashes or brackets")
         String phone,
 
-        @Pattern(regexp = "^[0-9+() -]{7,25}$", message = "callingPhone must be 7-25 characters of digits, +, spaces, dashes or brackets")
-        String callingPhone,
-
         @Pattern(regexp = "^[0-9+() -]{7,25}$", message = "whatsappPhone must be 7-25 characters of digits, +, spaces, dashes or brackets")
         String whatsappPhone,
 

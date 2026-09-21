@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,4 +24,14 @@ public interface LeadCallLogRepository extends MongoRepository<LeadCallLog, Obje
 
     /** Attempts already made for a lead since a point in time - enforces the per-day cap. */
     long countByLeadIdAndDialStartedAtGreaterThanEqual(ObjectId leadId, OffsetDateTime since);
+
+    /** Attempts opened for a lead, answered or not. The row's attempt number counts these. */
+    long countByLeadId(ObjectId leadId);
+
+    /**
+     * Dials today that never reached the lead. The daily cap counts these rather than
+     * every attempt: a lead who keeps picking up is not someone we are pestering.
+     */
+    long countByLeadIdAndDialStartedAtGreaterThanEqualAndOutcomeIn(
+            ObjectId leadId, OffsetDateTime since, Collection<String> outcomes);
 }
